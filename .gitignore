@@ -1,0 +1,39 @@
+# Python
+__pycache__/
+*.py[cod]
+*.so
+.venv/
+.python-version
+pip-wheel-metadata/
+build/
+dist/
+*.egg-info/
+
+# Tooling
+.uv/
+.ruff_cache/
+.mypy_cache/
+.pytest_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# Environment & secrets
+.env
+.env.local
+*.local
+
+# IDE/editor
+.vscode/
+.idea/
+*.swp
+
+# OS cruft
+.DS_Store
+Thumbs.db
+
+# Project artifacts
+models/*.pt
+outputs/
+*.mp4
+logs/
