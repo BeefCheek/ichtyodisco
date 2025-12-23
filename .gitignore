@@ -37,3 +37,6 @@ models/*.pt
 outputs/
 *.mp4
 logs/
+
+# notebooks
+notebooks/
