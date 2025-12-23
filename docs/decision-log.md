@@ -1,19 +1,24 @@
-## Décisions récentes
+## Recent Decisions
 
-### Capture vidéo (déc. 2025)
+### Video capture (Dec 2025)
 
-- **Ce qui a été fait**
-  - Création d’un wrapper `WebcamCapture` qui encapsule `cv2.VideoCapture`.
-  - Gestion d’un thread dédié pour ne pas bloquer le pipeline principal.
-  - Mise en place d’un buffer circulaire thread-safe (deque + verrou) afin de décorréler la cadence de capture de la cadence de consommation.
-  - Tentatives automatiques de reconnexion quand `read()` échoue ou que la webcam se déconnecte.
+- **What we delivered**
+  - Built a `WebcamCapture` wrapper around `cv2.VideoCapture`.
+  - Added a dedicated thread so capture never blocks the downstream pipeline.
+  - Introduced a thread-safe circular buffer (deque + lock) to decouple capture cadence from consumption cadence.
+  - Added automatic reconnect attempts whenever `read()` fails or the webcam goes offline.
 
-- **Options discutées**
-  - *Single-thread + `cap.read()` direct dans la loop principale* : rejeté car cela bloquait l’inférence et compliquait la régulation du framerate.
-  - *Queue illimitée* : rejetée pour éviter les fuites mémoire en cas de backlog ; la deque bornée suffit car seuls les derniers frames importent.
-  - *Reconnexion synchronisée côté appelant* : rejetée au profit d’une logique interne dans le thread, pour éviter que les consommateurs aient à gérer l’état matériel.
+- **Options discussed**
+  - *Single-thread + direct `cap.read()` in the main loop*: rejected because it stalled inference and made FPS control harder.
+  - *Unbounded queue*: rejected to avoid memory leaks in backlog scenarios; a bounded deque keeps only the frames that matter.
+  - *Caller-managed reconnect logic*: rejected in favor of handling hardware state inside the capture thread.
 
-- **Raisons du choix actuel**
-  - Le threading garantit un flux continu et prévisible pour le ML même si le traitement en aval varie.
-  - Le buffer borné protège la mémoire et limite la latence.
-  - La reconnexion automatique améliore la robustesse sans exposer la complexité au reste du code.
+- **Why this approach**
+  - Threading keeps a steady feed for ML even when downstream workload spikes.
+  - The bounded buffer protects memory and caps latency.
+  - Internal auto-reconnect increases robustness without leaking hardware concerns elsewhere.
+
+### Explanatory notes
+
+- **deque (collections.deque)**
+  Double-ended queue optimized for O(1) inserts/removals on both ends. Setting `maxlen` turns it into a circular buffer that automatically discards older entries, ideal for keeping just the latest frames without unbounded memory growth. Random access is still possible (O(n)), and a separate lock is required for safe multi-threaded use.
