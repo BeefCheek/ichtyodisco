@@ -120,6 +120,25 @@ class WebcamCapture:
             latest = self._frame_buffer[-1]
             return latest.copy()
 
+    def wait_for_frame(self, timeout_s: Optional[float] = 10.):
+        """
+        Block until at least one frame is available, then return the freshest copy.
+
+        Args:
+            timeout_s: Max seconds to wait; None waits indefinitely.
+
+        Returns:
+            Latest frame copy, or None if the timeout elapsed without any frame.
+        """
+        got_frame = self._frame_available.wait(timeout=timeout_s)
+        if not got_frame:
+            return None
+
+        with self._buffer_lock:
+            if not self._frame_buffer:
+                return None
+            return self._frame_buffer[-1].copy()
+
     def get_frame_for_inference(self):
         """
         Return a resized frame suited for downstream ML.
