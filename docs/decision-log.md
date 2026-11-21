@@ -32,3 +32,29 @@
 
 - **FPS monitoring**
   `fps_actual` is computed from the timestamps of the last N captured frames, providing a rolling measurement that highlights drops due to disconnects or pipeline backpressure without depending on downstream processing time.
+
+### Depth, behaviour analytics and livestream (Nov 2026)
+
+- **What we delivered**
+  - Full pipeline `capture → YOLO/ByteTrack → async monocular depth → analytics → overlay → dashboard / RTMP / OSC / SQLite`, behind one CLI (`ichtyodisco`).
+  - Monocular depth through Hugging Face `transformers` (Apple Depth Pro, Depth Anything V2), normalised to the tank volume (`z ∈ [0 front glass, 1 back wall]`).
+  - An analytics engine that learns the tank: circadian baselines, adaptive swim-state thresholds, resident re-identification, social metrics, occupancy maps, rule-based events and a "mood".
+  - Zero-dependency web dashboard (stdlib HTTP, MJPEG, Server-Sent Events), an OBS overlay widget, and an ffmpeg RTMP pusher.
+  - A synthetic 3D aquarium (`--demo`) that feeds ground-truth tracks and depth, used for demos and the test suite.
+
+- **Options discussed**
+  - *Depth on every frame*: rejected. Depth Pro is ~0.3 s/frame on a datacentre GPU; fish change depth slowly, so depth runs on its own thread at a capped rate on the newest frame (older pending frames are dropped, never queued).
+  - *Absolute metric depth*: rejected for now. Refraction through the glass and scale ambiguity make metres meaningless; robust near/far percentile planes, smoothed over time, give a stable relative tank depth.
+  - *Fixed thresholds for "agitated", "resting", "sprint"*: rejected. Every tank (species, size, lighting) is different. Thresholds are z-scores against per-hour baselines and quantiles of the tank's own speed distribution, all with time-based exponential forgetting.
+  - *Count-based running stats*: rejected in favour of time-based decay, so the learnt model does not depend on FPS or on how long the process ran.
+  - *FastAPI/websockets for the dashboard*: rejected to keep dependencies minimal; stdlib `ThreadingHTTPServer` with MJPEG + SSE is enough for a handful of viewers. Public viewers watch the RTMP stream, not the dashboard.
+  - *Streaming only via OBS*: kept as an option, but the built-in ffmpeg pusher lets a headless box stream 24/7.
+  - *Colour-histogram re-id alone*: too noisy with small fish and occlusions; combined with spatio-temporal gating (a track that appears where a resident vanished < 3 s ago is the same fish) and a strict ratio test otherwise.
+
+- **Why this approach**
+  - The hot path (tracking + drawing) stays at camera rate; everything slow is async (depth, SQLite writes, ffmpeg pacing, HTTP).
+  - Everything learnt is JSON-serialisable and persisted every minute, so restarts don't reset what the system knows about its residents.
+  - The simulator makes the whole stack testable in CI without camera, GPU or model downloads.
+
+- **Licensing note**
+  - Apple Depth Pro weights are research-only (Apple ASCL); Depth Anything V2 Small is Apache-2.0, Base/Large are CC-BY-NC-4.0. The default is V2 Small so a public (possibly monetised) stream stays compliant.

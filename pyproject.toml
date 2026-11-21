@@ -1,15 +1,34 @@
 [project]
 name = "ichtyodisco"
-version = "0.1.0"
-description = "Real-time aquarium ML tracking with sound synthesis"
+version = "0.2.0"
+description = "Real-time aquarium ML tracking, 3D behaviour analytics, livestream and sound synthesis"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "ipykernel>=7.1.0",
+    "lap>=0.5.12",  # required by Ultralytics ByteTrack/BoT-SORT association
+    "numpy>=1.26",
     "opencv-python>=4.12.0.88",
     "python-osc>=1.9.3",
     "ultralytics>=8.3.235",
 ]
+
+[project.optional-dependencies]
+# Monocular depth (Apple Depth Pro, Depth Anything V2, ...) through Hugging Face transformers.
+depth = [
+    "transformers>=4.49",
+    "pillow>=10",
+]
+
+[project.scripts]
+ichtyodisco = "aquarium.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/aquarium"]
 
 [dependency-groups]
 dev = [
@@ -18,3 +37,14 @@ dev = [
     "pytest>=9.0.2",
     "ruff>=0.14.8",
 ]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]

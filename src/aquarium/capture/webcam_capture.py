@@ -1,7 +1,6 @@
 import threading
 import time
 from collections import deque
-from typing import Deque, Optional, Tuple
 
 import cv2
 
@@ -27,8 +26,8 @@ class WebcamCapture:
         webcam_index: int = 0,
         buffer_size: int = 5,
         reconnect_backoff_s: float = 0.5,
-        capture_resolution: Tuple[int, int] = (4096, 2160),
-        inference_resolution: Tuple[int, int] = (640, 360),
+        capture_resolution: tuple[int, int] = (4096, 2160),
+        inference_resolution: tuple[int, int] = (640, 360),
         target_fps: float = 30.0,
         fps_window: int = 60,
     ):
@@ -38,17 +37,20 @@ class WebcamCapture:
         self.target_fps = target_fps
 
         self.cap = cv2.VideoCapture(webcam_index)
-        self._thread: Optional[threading.Thread] = None
+        self._thread: threading.Thread | None = None
         self._stop_event = threading.Event()
 
-        self._frame_buffer: Deque = deque(maxlen=self.buffer_size)
+        self._frame_buffer: deque = deque(maxlen=self.buffer_size)
         self._buffer_lock = threading.Lock()
+        self._new_frame = threading.Condition(self._buffer_lock)
+        self._seq = 0
+        self._consumed_seq = 0
         self._frame_available = threading.Event()
-        self._frame_times: Deque[float] = deque(maxlen=max(2, fps_window))
+        self._frame_times: deque[float] = deque(maxlen=max(2, fps_window))
         self._fps_lock = threading.Lock()
 
         self._capture_resolution = capture_resolution
-        self._native_resolution: Tuple[int, int] = (0, 0)
+        self._native_resolution: tuple[int, int] = (0, 0)
         self._inference_resolution = inference_resolution
 
     def start(self):
@@ -95,7 +97,9 @@ class WebcamCapture:
 
             with self._buffer_lock:
                 self._frame_buffer.append(frame)
+                self._seq += 1
                 self._frame_available.set()
+                self._new_frame.notify_all()
 
             with self._fps_lock:
                 self._frame_times.append(time.monotonic())
@@ -120,7 +124,7 @@ class WebcamCapture:
             latest = self._frame_buffer[-1]
             return latest.copy()
 
-    def wait_for_frame(self, timeout_s: Optional[float] = 10.):
+    def wait_for_frame(self, timeout_s: float | None = 10.):
         """
         Block until at least one frame is available, then return the freshest copy.
 
@@ -137,6 +141,27 @@ class WebcamCapture:
         with self._buffer_lock:
             if not self._frame_buffer:
                 return None
+            return self._frame_buffer[-1].copy()
+
+    def wait_for_new_frame(self, timeout_s: float | None = 10.0):
+        """
+        Block until a frame that has not been returned yet by this method is available.
+
+        Unlike `wait_for_frame`, a consumer faster than the camera never receives the same
+        frame twice, which keeps velocity estimates downstream honest (no fake zero-motion
+        samples).
+
+        Returns:
+            Latest frame copy, or None on timeout.
+        """
+        deadline = None if timeout_s is None else time.monotonic() + timeout_s
+        with self._new_frame:
+            while self._seq <= self._consumed_seq:
+                remaining = None if deadline is None else deadline - time.monotonic()
+                if remaining is not None and remaining <= 0:
+                    return None
+                self._new_frame.wait(remaining)
+            self._consumed_seq = self._seq
             return self._frame_buffer[-1].copy()
 
     def get_frame_for_inference(self):
@@ -197,29 +222,29 @@ class WebcamCapture:
         )
 
     @property
-    def native_resolution(self) -> Tuple[int, int]:
+    def native_resolution(self) -> tuple[int, int]:
         """Resolution actually reported by the webcam after configuration."""
         return self._native_resolution
 
     @property
-    def capture_resolution(self) -> Tuple[int, int]:
+    def capture_resolution(self) -> tuple[int, int]:
         """Resolution we request from the webcam (may differ from native)."""
         return self._capture_resolution
 
     @capture_resolution.setter
-    def capture_resolution(self, resolution: Tuple[int, int]):
+    def capture_resolution(self, resolution: tuple[int, int]):
         """Update requested capture resolution (applies on next (re)start)."""
         self._capture_resolution = resolution
         if self.cap.isOpened():
             self._apply_capture_settings()
 
     @property
-    def inference_resolution(self) -> Tuple[int, int]:
+    def inference_resolution(self) -> tuple[int, int]:
         """Resolution used when resizing frames for inference."""
         return self._inference_resolution
 
     @inference_resolution.setter
-    def inference_resolution(self, resolution: Tuple[int, int]):
+    def inference_resolution(self, resolution: tuple[int, int]):
         self._inference_resolution = resolution
 
     @property

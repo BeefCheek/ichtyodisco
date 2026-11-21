@@ -1,0 +1,53 @@
+# ichtyodisco — copy to config/local.toml and run:  uv run ichtyodisco -c config/local.toml
+# Every key is optional; defaults live in src/aquarium/config.py.
+
+[source]
+uri = "0"                 # webcam index, video file, rtsp://..., or "sim"
+capture_width = 1920
+capture_height = 1080
+target_fps = 30
+
+[tracking]
+model = "models/fish.pt"  # fine-tuned YOLO (see README). "yolo11n.pt" = generic COCO
+tracker = "bytetrack.yaml"
+confidence = 0.35
+imgsz = 640
+# device = "cuda:0"
+
+[depth]
+enabled = true
+# "depth-anything-v2-small" (fast, Apache-2.0) | "depth-pro" (sharper, research licence)
+model = "depth-anything-v2-small"
+max_rate_hz = 4.0
+input_width = 518
+
+[analytics]
+tank_depth_ratio = 0.4          # tank depth / width, e.g. 40 cm / 100 cm
+baseline_half_life_hours = 72   # how fast "normal" adapts (lower = more reactive)
+hiding_seconds = 45
+chase_distance = 0.08
+
+[storage]
+path = "outputs/ichtyodisco.sqlite"
+
+[dashboard]
+host = "127.0.0.1"   # "0.0.0.0" to open on the LAN (no authentication!)
+port = 8765
+
+[stream]
+enabled = false
+# url = "rtmp://a.rtmp.youtube.com/live2/XXXX-XXXX-XXXX-XXXX"   # keep the key out of git!
+width = 1280
+height = 720
+fps = 30
+bitrate = "4500k"
+encoder = "libx264"   # "h264_nvenc" on NVIDIA, "h264_videotoolbox" on Mac
+
+[osc]
+enabled = false
+host = "127.0.0.1"
+port = 57120
+
+[render]
+title = "ICHTYODISCO"
+trails_seconds = 4.0
