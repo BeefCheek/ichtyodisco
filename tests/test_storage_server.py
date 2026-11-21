@@ -84,3 +84,12 @@ def test_ffmpeg_command_for_youtube():
     assert cmd[-1].endswith("/KEY") and cmd[-2] == "flv"
     assert "anullsrc=channel_layout=stereo:sample_rate=44100" in cmd
     assert "-g" in cmd and cmd[cmd.index("-g") + 1] == "60"
+
+
+def test_ffmpeg_command_with_synth_audio_input():
+    cmd = build_ffmpeg_cmd(StreamConfig(enabled=True, url="rtmp://x/live/KEY",
+                                        audio_input="avfoundation::0"))
+    i = cmd.index("avfoundation")
+    assert cmd[i + 1:i + 3] == ["-i", ":0"]
+    assert "anullsrc=channel_layout=stereo:sample_rate=44100" not in cmd
+    assert "aresample=async=1000" in cmd

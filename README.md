@@ -1,15 +1,17 @@
 # ichtyodisco
 
-Un aquarium qui s'observe lui-même, en direct : tracking des poissons, **profondeur
-monoculaire** (Apple Depth Pro / Depth Anything V2), analyse comportementale qui **apprend
-la « normale » de l'aquarium heure par heure**, dashboard web, **livestream RTMP**
-(YouTube / Twitch) et sortie **OSC** pour piloter un synthé.
+Un aquarium qui s'observe lui-même et **se joue en musique**, en direct : tracking des
+poissons, **profondeur monoculaire** (Apple Depth Pro / Depth Anything V2), analyse
+comportementale qui **apprend la « normale » de l'aquarium heure par heure**, un **chef
+d'orchestre MIDI** qui fait jouer tes synthés par les habitants, dashboard web et
+**livestream RTMP** (YouTube / Twitch) avec le son des synthés.
 
 ```
 caméra ──► YOLO + ByteTrack ──► profondeur (async) ──► moteur d'analyse ──► overlay vidéo ──► RTMP (YouTube/Twitch)
                                                           │                        └──────► dashboard web (MJPEG + SSE)
                                                           ├─► SQLite (séries, événements, modèle appris)
-                                                          └─► OSC (SuperCollider, Max, Pd, TouchDesigner)
+                                                          ├─► MIDI → tes synthés (hardware / DAW) ──► carte son ──► stream
+                                                          └─► OSC (Max, SuperCollider, Pd, TouchDesigner)
 ```
 
 ## Démarrage rapide
@@ -38,8 +40,11 @@ Deux façons, combinables :
    uv run ichtyodisco -s 0 --model models/fish.pt --stream "rtmp://a.rtmp.youtube.com/live2/<clé>"
    ```
    ffmpeg reçoit la vidéo annotée (overlay compris) à cadence constante — même si l'inférence
-   ralentit, le flux reste fluide — avec une piste audio silencieuse (YouTube l'exige) et
-   redémarre tout seul si le réseau coupe. Sur GPU NVIDIA, mettre `encoder = "h264_nvenc"`.
+   ralentit, le flux reste fluide — et redémarre tout seul si le réseau coupe. Pour mettre
+   **le son de tes synthés** dans le stream, ajoute l'entrée de ta carte son :
+   `--audio-in avfoundation::0` (Mac), `--audio-in pulse:default` (Linux),
+   `--audio-in "dshow:audio=Line 1 (Focusrite)"` (Windows) ; sans ça, une piste muette est
+   envoyée (YouTube l'exige). Sur GPU NVIDIA, mettre `encoder = "h264_nvenc"`.
    Ne commitez jamais la clé de stream : mettez-la dans `config/local.toml` (ignoré par git)
    ou passez-la en argument.
 2. **Via OBS** (pour une mise en scène plus libre) : source *Navigateur* sur
@@ -129,12 +134,45 @@ poisson), `events`, et `kv` (le modèle appris). Ouvrable avec pandas, DB Browse
 API JSON : `/api/snapshot`, `/api/history?minutes=60`, `/api/events`, `/api/residents`,
 `/api/profile?metric=activity`, `/api/daily?days=7`, et le flux SSE `/api/live`.
 
-## Son (OSC)
+## Musique : l'aquarium joue tes synthés
+
+```bash
+uv sync --extra midi                     # ports MIDI temps réel (python-rtmidi)
+uv run ichtyodisco -s 0 --midi           # crée un port MIDI virtuel « ichtyodisco »
+uv run ichtyodisco -s 0 --midi IAC       # ou un port existant : IAC (Mac), loopMIDI (Windows), ton synthé USB
+uv run ichtyodisco --demo --midi --midi-record outputs/session.mid --key F# --bpm 90
+uv run ichtyodisco --midi-list           # lister les ports
+```
+
+Un **chef d'orchestre** génératif traduit le comportement en musique, toujours dans la
+tonalité (rien ne sonne faux), et la musique évolue avec ce que le modèle apprend :
+
+| aquarium | musique |
+|---|---|
+| humeur (serein, joueur, excité, endormi, qui-vive, festin, désert) | mode et progression d'accords : lydien flottant quand c'est serein, dorien quand ça s'agite, phrygien tendu en alerte, majeur pendant le repas, drone quand l'aquarium est vide |
+| activité vs normale de l'heure | tempo (±), rythme de la basse, densité de la batterie |
+| cohésion du banc | voicing du pad : banc serré = accord serré, banc dispersé = accord ouvert |
+| polarisation | molette de modulation (CC1) du pad |
+| **chaque poisson = une voix / un canal MIDI** | hauteur = profondeur verticale (surface = aigu) ; rythme = état de nage (repos = notes longues et rares, croisière = croches, sprint = rafales de doubles) ; vélocité = vitesse ; pan (CC10) = gauche-droite ; **brillance CC74 et réverbe CC91 = distance à la vitre** (un poisson au fond sonne « lointain ») |
+| événements | phrases : repas = arpège montant + crash, poursuite = question-réponse entre les voix des deux poissons, nouveau venu = cloche, record = gamme éclair, alerte = trémolo de seconde mineure |
+
+Canaux par défaut : **1** pad, **2** basse, **3** lead/événements, **4-9** poissons, **10**
+batterie (mapping General MIDI : kick 36, rim 37, hats 42/46, crash 49, shaker 82). Dans
+Ableton / Bitwig / Logic : une piste par canal, chacune avec l'instrument de ton choix
+(Vital, Diva, Pigments, un sampler…). En hardware : règle le canal MIDI de chaque synthé.
+`send_clock = true` envoie l'horloge MIDI pour que les arpégiateurs et le DAW suivent le
+tempo de l'aquarium. Tout est réglable dans `[music]` (`config/example.toml`).
+
+`--midi-record` enregistre la session en `.mid` (timing réel), pour la retravailler dans un DAW.
+
+> `python-rtmidi` fournit des binaires jusqu'à Python 3.12 ; en 3.13 il se compile (Xcode CLT
+> sur Mac, `libasound2-dev` sur Linux, MSVC sur Windows). Le plus simple : `uv python pin 3.12`.
+
+### OSC (Max/MSP, SuperCollider, TouchDesigner…)
 
 `--osc 127.0.0.1:57120` envoie `/aq/fish id x y z vitesse état` (≈20 Hz), `/aq/group`,
-`/aq/mood` et `/aq/event`. Idées : z → réverbe / filtre passe-bas (les poissons du fond
-sonnent « sous l'eau »), y → hauteur, vitesse → amplitude, écart à la normale → tension
-harmonique, événements → samples one-shot.
+`/aq/mood` et `/aq/event`. Dans Max : `[udpreceive 57120]` → `[route /aq/fish /aq/group /aq/event]`.
+Pratique pour des visuels réactifs ou des modulations en plus du MIDI.
 
 ## Entraîner le détecteur
 
@@ -154,7 +192,7 @@ reflets sur la vitre (sinon les reflets deviennent des « poissons fantômes »)
 ## Développement
 
 ```bash
-uv run pytest            # 30 tests, ~10 s, sans caméra ni GPU (simulateur)
+uv run pytest            # 40 tests, ~10 s, sans caméra ni GPU (simulateur)
 uv run ruff check src tests
 ```
 
@@ -169,6 +207,7 @@ src/aquarium/
   storage/     SQLite (écriture asynchrone)
   render/      overlay broadcast
   stream/      dashboard web (stdlib), widget OBS, RTMP via ffmpeg
+  music/       chef d'orchestre MIDI (théorie, génération, ports / enregistrement .mid)
   sound/       pont OSC
   sim/         aquarium synthétique (démo + tests)
 ```

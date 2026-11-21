@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import shutil
 import subprocess
+import sys
 import threading
 import time
 
@@ -23,7 +24,11 @@ def build_ffmpeg_cmd(cfg: StreamConfig) -> list[str]:
         "-f", "rawvideo", "-pix_fmt", "bgr24", "-s", f"{cfg.width}x{cfg.height}",
         "-r", str(cfg.fps), "-i", "pipe:0",
     ]
-    if cfg.silent_audio:
+    live_audio = bool(cfg.audio_input)
+    if live_audio:
+        fmt, _, device = cfg.audio_input.partition(":")
+        cmd += ["-thread_queue_size", "1024", "-f", fmt, "-i", device]
+    elif cfg.silent_audio:
         cmd += ["-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=44100"]
     gop = str(cfg.fps * 2)  # keyframe every 2 s (YouTube/Twitch recommendation)
     cmd += ["-c:v", cfg.encoder, "-pix_fmt", "yuv420p", "-b:v", cfg.bitrate,
@@ -31,7 +36,11 @@ def build_ffmpeg_cmd(cfg: StreamConfig) -> list[str]:
             "-keyint_min", gop]
     if cfg.encoder == "libx264":
         cmd += ["-preset", cfg.preset, "-tune", "zerolatency", "-sc_threshold", "0"]
-    if cfg.silent_audio:
+    if live_audio:
+        # resample against the video clock so hours of streaming don't drift out of sync
+        cmd += ["-map", "0:v", "-map", "1:a", "-c:a", "aac", "-b:a", "160k", "-ar", "44100",
+                "-af", "aresample=async=1000"]
+    elif cfg.silent_audio:
         cmd += ["-c:a", "aac", "-b:a", "128k", "-shortest"]
     url = cfg.url
     if url.startswith(("rtmp://", "rtmps://")) or url.endswith(".flv"):
@@ -78,10 +87,19 @@ class FFmpegStreamer:
         with self._lock:
             self._latest = frame
 
+    @property
+    def is_network(self) -> bool:
+        return "://" in self.cfg.url
+
     def _spawn(self) -> subprocess.Popen[bytes]:
         cmd = build_ffmpeg_cmd(self.cfg)
         log.info("starting ffmpeg: %s", " ".join(c if "live" not in c else "<url>" for c in cmd))
-        return subprocess.Popen(cmd, stdin=subprocess.PIPE)
+        # Own process group: Ctrl+C must reach *us* only, so we can close ffmpeg's stdin and let
+        # it finalise the stream / file properly instead of being killed mid-write.
+        if sys.platform == "win32":
+            return subprocess.Popen(cmd, stdin=subprocess.PIPE,
+                                    creationflags=subprocess.CREATE_NEW_PROCESS_GROUP)
+        return subprocess.Popen(cmd, stdin=subprocess.PIPE, start_new_session=True)
 
     def _loop(self) -> None:
         period = 1.0 / self.cfg.fps
@@ -94,6 +112,11 @@ class FFmpegStreamer:
                 next_t = time.monotonic()
                 continue
             if self._proc is None or self._proc.poll() is not None:
+                if self._proc is not None and not self.is_network:
+                    log.error("ffmpeg exited (code %s) while writing %s; not restarting (it would "
+                              "overwrite the file)", self._proc.returncode, self.cfg.url)
+                    self._proc = None
+                    break
                 if self._proc is not None:
                     self.restarts += 1
                     log.warning("ffmpeg exited (code %s), restarting in 2 s", self._proc.returncode)

@@ -135,6 +135,10 @@ td.num, th.num { text-align: right; }
       <div class="stack" id="stack"></div>
       <div class="legend" id="stacklegend"></div>
     </div>
+    <div class="card" id="musiccard" hidden>
+      <h2>Musique <span class="sub">ce que l'aquarium joue sur tes synthés (MIDI)</span></h2>
+      <div class="kpis" id="music"></div>
+    </div>
     <div class="card">
       <h2>Vue de dessus <span class="sub">position gauche-droite × profondeur estimée</span></h2>
       <div class="chart" id="top"><canvas height="170"></canvas><div class="tip"></div></div>
@@ -350,6 +354,13 @@ function renderHeader() {
   $("#learntxt").textContent = `${L.hours_learnt || 0}/24 h · ${L.residents || 0} résidents`;
   $("#insights").innerHTML = (snap.insights || []).map((s) => `<li>${esc(s)}</li>`).join("");
 }
+function renderMusic() {
+  const mu = snap.music; if (!mu) return;
+  $("#musiccard").hidden = false;
+  $("#music").innerHTML = [["Tonalité", `${esc(mu.key)} <small>${esc(mu.mode)}</small>`], ["Accord", `${esc(mu.chord)} <small>${esc(mu.roman)}</small>`],
+    ["Tempo", `${fmt(mu.bpm, 0)} <small>bpm</small>`], ["Notes jouées", mu.notes]]
+    .map(([l, v]) => `<div class="kpi"><div class="label">${l}</div><div class="value">${v}</div></div>`).join("");
+}
 function drawAll() { drawTimeline(); drawProfile(); drawTop(); }
 
 // ---------- data
@@ -359,7 +370,7 @@ es.onerror = () => { $("#live").classList.remove("on"); $("#live span").textCont
 let feed = [];
 es.onmessage = (msg) => {
   snap = JSON.parse(msg.data);
-  renderHeader(); renderKpis(); renderStates(); drawTop();
+  renderHeader(); renderKpis(); renderStates(); renderMusic(); drawTop();
   if (snap.events && snap.events.length) { feed = snap.events.slice().reverse().concat(feed).slice(0, 60); renderFeed(feed); }
   if (rangeMin <= 30 && snap.metrics) {
     history.push({ t: snap.t, activity: snap.metrics.activity, fish_count: snap.fish_count, activity_z: (snap.zscores || {}).activity });

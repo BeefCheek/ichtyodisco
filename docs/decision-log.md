@@ -58,3 +58,19 @@
 
 - **Licensing note**
   - Apple Depth Pro weights are research-only (Apple ASCL); Depth Anything V2 Small is Apache-2.0, Base/Large are CC-BY-NC-4.0. The default is V2 Small so a public (possibly monetised) stream stays compliant.
+
+### Music: MIDI conductor instead of the old Max patch (Nov 2026)
+
+- **What we delivered**
+  - `aquarium.music`: a generative conductor that maps the analytics (mood, activity vs the learnt norm, cohesion, polarisation, per-fish height / depth / speed / swim state, events) to MIDI: pad, bass, drums, one voice per fish, event phrases.
+  - Live MIDI output (virtual port or any existing port) and `.mid` recording; `--audio-in` to put the synths' audio in the RTMP stream.
+
+- **Options discussed**
+  - *Keep the colour-tracking Max patch*: dropped, too basic; Max stays reachable through OSC.
+  - *Code our own synth engine in Python*: rejected for now ("a different project"); MIDI lets real synths (hardware or plugins) do the sound design, which sounds far better for a livestream.
+  - *Map positions straight to pitch*: rejected; everything is quantised to the chord / mode so the result is always musical, and the mode follows the tank's mood.
+
+- **Why this approach**
+  - Musical decisions run on their own clock thread (16th-note grid, note-offs scheduled on a heap) so video inference jitter never affects timing.
+  - Mode changes wait for a mood to be stable for a bar, so the harmony doesn't flap.
+  - Every note is released on exit (all-notes-off panic), so synths never hang on a stuck note.

@@ -295,6 +295,10 @@ class OverlayRenderer:
         perf = f"{fps:.0f} fps" if fps else ""
         if stats.get("depth_model"):
             perf += f" · profondeur {stats['depth_model']}"
+        music = stats.get("music")
+        if music:
+            perf = (f"♪ {music['key']} {music['mode']} · {music['chord']} ({music['roman']})"
+                    f" · {music['bpm']:.0f} bpm")
         d.text((bx, y), perf, font=self.f_small, fill=(130, 150, 170, 255))
 
         # Events / insights ticker (bottom-left) -------------------------------

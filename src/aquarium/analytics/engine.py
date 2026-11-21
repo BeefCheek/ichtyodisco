@@ -242,6 +242,16 @@ class AnalyticsEngine:
         self.latest = snap
         return snap
 
+    def live_fish(self, t: float) -> list[dict[str, Any]]:
+        """Lightweight per-frame view of visible fish (for real-time consumers like music)."""
+        out = []
+        for i in self.visible_ids(t, max_age=0.3):
+            xn, yn, zn = self.norm_pos[i]
+            out.append({"id": i, "x": xn, "y": yn, "z": zn,
+                        "speed_bls": self.tracks[i].kin.speed_bls,
+                        "state": self.states.get(i, "cruise")})
+        return out
+
     def drain_events(self) -> list[AquariumEvent]:
         out, self._pending_events = self._pending_events, []
         return out

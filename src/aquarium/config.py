@@ -91,6 +91,10 @@ class StreamConfig:
     preset: str = "veryfast"
     encoder: str = "libx264"  # "h264_nvenc" / "h264_videotoolbox" when available
     silent_audio: bool = True  # YouTube refuses streams without an audio track
+    # Put your synths in the stream: an ffmpeg audio input "<format>:<device>", e.g.
+    #   macOS "avfoundation::0" · Linux "pulse:default" / "alsa:hw:1" · Windows "dshow:audio=Line 1"
+    # (list devices: ffmpeg -f avfoundation -list_devices true -i "" / -f dshow -list_devices true -i dummy)
+    audio_input: str | None = None
 
 
 @dataclass
@@ -99,6 +103,28 @@ class OscConfig:
     host: str = "127.0.0.1"
     port: int = 57120  # SuperCollider default
     rate_hz: float = 20.0
+
+
+@dataclass
+class MusicConfig:
+    """Generative music sent as MIDI to your synths (see aquarium/music/conductor.py)."""
+
+    enabled: bool = False
+    port: str | None = "ichtyodisco"  # virtual port name, or part of an existing port's name
+    record_path: str | None = None  # also record the session to a .mid file
+    key: str = "D"
+    base_bpm: float = 84.0
+    pad_channel: int = 1
+    bass_channel: int = 2
+    lead_channel: int = 3  # event phrases
+    fish_channels: list[int] = field(default_factory=lambda: [4, 5, 6, 7, 8, 9])
+    drums_channel: int = 10
+    drums: bool = True
+    max_voices: int = 6
+    fish_range: tuple[int, int] = (55, 88)  # MIDI notes: bottom of the tank -> surface
+    send_clock: bool = False  # MIDI clock so arpeggiators / DAW follow the tank's tempo
+    humanize: float = 0.08
+    seed: int | None = None
 
 
 @dataclass
@@ -121,6 +147,7 @@ class AppConfig:
     dashboard: DashboardConfig = field(default_factory=DashboardConfig)
     stream: StreamConfig = field(default_factory=StreamConfig)
     osc: OscConfig = field(default_factory=OscConfig)
+    music: MusicConfig = field(default_factory=MusicConfig)
     render: RenderConfig = field(default_factory=RenderConfig)
 
     @classmethod

@@ -82,6 +82,7 @@ class Pipeline:
         self.server = None
         self.streamer = None
         self.osc = None
+        self.conductor = None
         self._stop = False
         self._loop_times: deque[float] = deque(maxlen=60)
         self._timings: dict[str, float] = {}
@@ -120,6 +121,14 @@ class Pipeline:
 
             self.osc = OscBridge(cfg.osc.host, cfg.osc.port, cfg.osc.rate_hz)
             log.info("OSC -> %s:%d", cfg.osc.host, cfg.osc.port)
+        if cfg.music.enabled:
+            from aquarium.music import Conductor, open_sinks
+
+            sink = open_sinks(cfg.music.port, cfg.music.record_path)
+            if sink.sinks:
+                self.conductor = Conductor(cfg.music, sink)
+                self.conductor.start()
+                log.info("music: key %s, base %.0f bpm", cfg.music.key, cfg.music.base_bpm)
 
     def stop(self, *_: Any) -> None:
         self._stop = True
@@ -149,6 +158,8 @@ class Pipeline:
             self.shutdown()
 
     def shutdown(self) -> None:
+        if self.conductor:
+            self.conductor.stop()
         self.source.stop()
         if self.depth_worker:
             self.depth_worker.stop()
@@ -177,13 +188,18 @@ class Pipeline:
         self._attach_depth(fish, depth, frame.shape[:2], t)
 
         extra = {"perf": self.perf(), "depth": self._depth_info(depth)}
+        if self.conductor:
+            extra["music"] = self.conductor.status()
         snap = self.engine.update(fish, frame, frame.shape[:2], t=t, extra=extra)
+        if self.conductor:
+            self.conductor.set_state(self.engine.live_fish(t), self.engine.latest)
         t2 = time.perf_counter()
 
         latest = self.engine.latest or None
         out = self.renderer.render(frame, fish, latest, depth,
                                    stats={"fps": self.perf().get("fps"),
-                                          "depth_model": depth.model if depth else None})
+                                          "depth_model": depth.model if depth else None,
+                                          "music": self.conductor.status() if self.conductor else None})
         t3 = time.perf_counter()
         self.last_output = out
 
@@ -246,6 +262,8 @@ class Pipeline:
         if self.osc:
             self.osc.send_snapshot(snap)
             self.osc.send_events(events)
+        if self.conductor and events:
+            self.conductor.trigger([e.to_dict() for e in events])
 
     def perf(self) -> dict[str, Any]:
         lt = self._loop_times
