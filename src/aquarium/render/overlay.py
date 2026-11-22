@@ -296,7 +296,11 @@ class OverlayRenderer:
         if stats.get("depth_model"):
             perf += f" · profondeur {stats['depth_model']}"
         music = stats.get("music")
-        if music:
+        if music and music.get("mode") == "score":
+            nxt = f" → {music['next']}" if music.get("next") else ""
+            perf = (f"♪ {music['section']}{nxt} · {len(music.get('layers', {}))} couches"
+                    f" · {music['bpm']:.0f} bpm")
+        elif music:
             perf = (f"♪ {music['key']} {music['mode']} · {music['chord']} ({music['roman']})"
                     f" · {music['bpm']:.0f} bpm")
         d.text((bx, y), perf, font=self.f_small, fill=(130, 150, 170, 255))

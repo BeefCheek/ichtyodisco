@@ -21,8 +21,6 @@ In a DAW, put one instrument per channel; on hardware, set each synth's MIDI cha
 
 from __future__ import annotations
 
-import heapq
-import itertools
 import logging
 import random
 import threading
@@ -34,6 +32,8 @@ import mido
 
 from aquarium.config import MusicConfig
 from aquarium.music.midi_out import MidiSink
+from aquarium.music.scheduler import MidiScheduler
+from aquarium.music.scheduler import clip as _clip
 from aquarium.music.theory import (
     MODE_FR,
     MOOD_MUSIC,
@@ -51,14 +51,10 @@ log = logging.getLogger(__name__)
 KICK, RIM, HAT, OPEN_HAT, CRASH, SHAKER = 36, 37, 42, 46, 49, 82
 
 
-def _clip(v: float, lo: float, hi: float) -> float:
-    return lo if v < lo else hi if v > hi else v
-
-
-class Conductor:
+class Conductor(MidiScheduler):
     def __init__(self, cfg: MusicConfig, sink: MidiSink):
+        super().__init__(sink, humanize=cfg.humanize, seed=cfg.seed)
         self.cfg = cfg
-        self.sink = sink
         self.root = note_number(cfg.key)
         self.rng = random.Random(cfg.seed)
         self._lock = threading.Lock()
@@ -77,13 +73,8 @@ class Conductor:
         self.chord_idx = 0
         self.degree = 0
         self.pad_notes: list[int] = []
-        self._timeline: list[tuple[float, int, mido.Message]] = []
-        self._seq = itertools.count()
-        self._active: set[tuple[int, int]] = set()
         self._fish_channel: dict[int, int] = {}
         self._last_note: dict[int, int] = {}
-        self._cc_cache: dict[tuple[int, int], int] = {}
-        self.notes_played = 0
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
 
@@ -142,12 +133,7 @@ class Conductor:
 
     def panic(self, t: float) -> None:
         """Release every sounding note (no stuck notes on the synths when we quit)."""
-        self._timeline.clear()
-        for ch, note in list(self._active):
-            self._emit(mido.Message("note_off", channel=ch, note=note, velocity=0), t)
-        self._active.clear()
-        for ch in self._channels():
-            self._emit(mido.Message("control_change", channel=ch, control=123, value=0), t)
+        self._panic(t, self._channels())
         if self.cfg.send_clock:
             self._emit(mido.Message("stop"), t)
 
@@ -159,37 +145,6 @@ class Conductor:
         c = self.cfg
         return {self._ch(x) for x in [c.pad_channel, c.bass_channel, c.lead_channel,
                                       c.drums_channel, *c.fish_channels]}
-
-    def _emit(self, msg: mido.Message, t: float) -> None:
-        if msg.type == "note_on" and msg.velocity > 0:
-            self._active.add((msg.channel, msg.note))
-            self.notes_played += 1
-        elif msg.type in ("note_off", "note_on"):
-            self._active.discard((msg.channel, msg.note))
-        self.sink.send(msg, t)
-
-    def _at(self, t: float, msg: mido.Message) -> None:
-        heapq.heappush(self._timeline, (t, next(self._seq), msg))
-
-    def _flush(self, until: float) -> None:
-        while self._timeline and self._timeline[0][0] <= until:
-            t, _, msg = heapq.heappop(self._timeline)
-            if msg.type == "note_on" and (msg.channel, msg.note) in self._active:
-                self._emit(mido.Message("note_off", channel=msg.channel, note=msg.note), t)
-            self._emit(msg, t)
-
-    def _play(self, t: float, ch: int, note: int, vel: float, dur: float) -> None:
-        note = int(_clip(note, 0, 127))
-        vel = int(_clip(vel * (1 + self.rng.uniform(-self.cfg.humanize, self.cfg.humanize)), 1, 127))
-        self._at(t, mido.Message("note_on", channel=ch, note=note, velocity=vel))
-        self._at(t + max(dur, 0.02), mido.Message("note_off", channel=ch, note=note, velocity=0))
-
-    def _cc(self, t: float, ch: int, control: int, value: float, min_delta: int = 3) -> None:
-        v = int(_clip(value, 0, 127))
-        key = (ch, control)
-        if abs(self._cc_cache.get(key, -100) - v) >= min_delta:
-            self._cc_cache[key] = v
-            self._emit(mido.Message("control_change", channel=ch, control=control, value=v), t)
 
     # ------------------------------------------------------------------ the music
     def _do_step(self, t: float) -> None:

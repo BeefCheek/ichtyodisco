@@ -179,10 +179,47 @@ tempo de l'aquarium. Tout est réglable dans `[music]` (`config/example.toml`).
 > `python-rtmidi` fournit des binaires jusqu'à Python 3.12 ; en 3.13 il se compile (Xcode CLT
 > sur Mac, `libasound2-dev` sur Linux, MSVC sur Windows). Le plus simple : `uv python pin 3.12`.
 
+### Mode partition « jeu vidéo » (`--score`)
+
+```bash
+uv run ichtyodisco -s 0 --midi --score scores/demo/score.toml
+uv run ichtyodisco --demo --midi --score scores/demo/score.toml --midi-record session.mid
+```
+
+Ici, c'est **toi qui composes** (des clips MIDI dans ton DAW) et ce sont les poissons qui
+décident de ce qui joue, comme une musique de jeu adaptative (iMUSE / Wwise / FMOD) :
+
+- **Sections** : l'état de l'aquarium choisit la section (calme, exploration, banc,
+  festin, nuit, vide…) via des conditions (`when = "polarization > 0.75 and fish_count >= 3"`)
+  et des priorités. Les changements attendent un temps, une mesure ou une phrase, et peuvent
+  passer par un **pont** propre à chaque transition (`calm -> feeding` ≠ `feeding -> *`).
+- **Couches** : chaque section est une pile de boucles dont le volume suit les métriques en
+  direct. Les **overlays** vivent hors des sections, et une couche partagée entre deux
+  sections continue sans repartir de zéro : c'est là que les sections se croisent.
+- **Stingers** : les **interactions fines** déclenchent des clips ou une simple note (un
+  sample dans ton sampler), calés sur la grille, panoramiqués là où ça s'est passé,
+  transposés / dosés selon l'événement. Exemple de la démo : un poisson sort du banc une
+  seconde et revient → *spike* (`note 76`, canal 10), plus fort s'il revient vite.
+- **Signaux** : des jauges d'intensité nourries par les événements, qui retombent toutes
+  seules (`excursions`, `chase_heat`) et pilotent n'importe quelle couche.
+
+Interactions détectées image par image (relatives à l'espacement du banc) :
+`school_leave`, `school_return` (+ durée de l'escapade), `school_split`, `school_merge`,
+`encounter`, `dash`, `surface`, `bottom`, `glass` (un poisson vient à la vitre),
+`back_wall`, `group_turn`, `appear`, `vanish` — en plus des événements lents (`feeding`,
+`chase`, `hiding`, `new_resident`…). Chacune porte `x y z speed` (et `duration`,
+`distance`, `groups`, `angle` selon le cas), utilisables dans les expressions.
+
+Tout est décrit dans `scores/demo/score.toml` (commenté). Les clips de la démo sont des
+placeholders générés par `scripts/make_demo_score.py` : remplace-les par les tiens. Les
+expressions sont un mini-langage sûr (arithmétique, comparaisons, `clip`, `smoothstep`…) :
+un fichier de partition ne peut pas exécuter de code.
+
 ### OSC (Max/MSP, SuperCollider, TouchDesigner…)
 
 `--osc 127.0.0.1:57120` envoie `/aq/fish id x y z vitesse état` (≈20 Hz), `/aq/group`,
-`/aq/mood` et `/aq/event`. Dans Max : `[udpreceive 57120]` → `[route /aq/fish /aq/group /aq/event]`.
+`/aq/mood` et `/aq/event` (événements lents *et* interactions fines : `school_return`,
+`encounter`…). Dans Max : `[udpreceive 57120]` → `[route /aq/fish /aq/group /aq/event]`.
 Pratique pour des visuels réactifs ou des modulations en plus du MIDI.
 
 ## Entraîner le détecteur
@@ -203,7 +240,7 @@ reflets sur la vitre (sinon les reflets deviennent des « poissons fantômes »)
 ## Développement
 
 ```bash
-uv run pytest            # 42 tests, ~10 s, sans caméra ni GPU (simulateur)
+uv run pytest            # 54 tests, ~10 s, sans caméra ni GPU (simulateur)
 uv run ruff check src tests
 ```
 
@@ -218,7 +255,9 @@ src/aquarium/
   storage/     SQLite (écriture asynchrone)
   render/      overlay broadcast
   stream/      dashboard web (stdlib), widget OBS, RTMP via ffmpeg
-  music/       chef d'orchestre MIDI (théorie, génération, ports / enregistrement .mid)
+  music/       musique MIDI : chef d'orchestre génératif, partition adaptative (sections,
+               couches, stingers), expressions, clips, ports / enregistrement .mid
+scores/demo/   partition de démo (score.toml + clips .mid)
   sound/       pont OSC
   sim/         aquarium synthétique (démo + tests)
 ```

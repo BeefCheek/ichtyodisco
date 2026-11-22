@@ -87,7 +87,7 @@ class Pipeline:
         self.server = None
         self.streamer = None
         self.osc = None
-        self.conductor = None
+        self.music = None
         self._stop = False
         self._loop_times: deque[float] = deque(maxlen=60)
         self._timings: dict[str, float] = {}
@@ -131,9 +131,21 @@ class Pipeline:
 
             sink = open_sinks(cfg.music.port, cfg.music.record_path)
             if sink.sinks:
-                self.conductor = Conductor(cfg.music, sink)
-                self.conductor.start()
-                log.info("music: key %s, base %.0f bpm", cfg.music.key, cfg.music.base_bpm)
+                if cfg.music.mode == "score":
+                    from aquarium.music.score import Score, ScorePlayer
+
+                    if not cfg.music.score:
+                        raise ValueError("music.mode = 'score' needs music.score = <path to .toml>")
+                    score = Score.load(cfg.music.score)
+                    self.music = ScorePlayer(score, sink, humanize=cfg.music.humanize,
+                                             seed=cfg.music.seed, send_clock=cfg.music.send_clock)
+                    log.info("music: score '%s' (%d sections, %d stingers)", score.name,
+                             len(score.sections), len(score.stingers))
+                else:
+                    self.music = Conductor(cfg.music, sink)
+                    log.info("music: generative, key %s, base %.0f bpm", cfg.music.key,
+                             cfg.music.base_bpm)
+                self.music.start()
 
     def stop(self, *_: Any) -> None:
         self._stop = True
@@ -163,8 +175,8 @@ class Pipeline:
             self.shutdown()
 
     def shutdown(self) -> None:
-        if self.conductor:
-            self.conductor.stop()
+        if self.music:
+            self.music.stop()
         self.source.stop()
         if self.depth_worker:
             self.depth_worker.stop()
@@ -193,18 +205,23 @@ class Pipeline:
         self._attach_depth(fish, depth, frame.shape[:2], t)
 
         extra = {"perf": self.perf(), "depth": self._depth_info(depth)}
-        if self.conductor:
-            extra["music"] = self.conductor.status()
+        if self.music:
+            extra["music"] = self.music.status()
         snap = self.engine.update(fish, frame, frame.shape[:2], t=t, extra=extra)
-        if self.conductor:
-            self.conductor.set_state(self.engine.live_fish(t), self.engine.latest)
+        inter = self.engine.drain_interactions()
+        if self.music:
+            self.music.set_state(self.engine.live_fish(t), self.engine.latest)
+            if inter:
+                self.music.trigger([e.to_dict() for e in inter])
+        if self.osc and inter:
+            self.osc.send_events(inter)
         t2 = time.perf_counter()
 
         latest = self.engine.latest or None
         out = self.renderer.render(frame, fish, latest, depth,
                                    stats={"fps": self.perf().get("fps"),
                                           "depth_model": depth.model if depth else None,
-                                          "music": self.conductor.status() if self.conductor else None})
+                                          "music": self.music.status() if self.music else None})
         t3 = time.perf_counter()
         self.last_output = out
 
@@ -267,8 +284,8 @@ class Pipeline:
         if self.osc:
             self.osc.send_snapshot(snap)
             self.osc.send_events(events)
-        if self.conductor and events:
-            self.conductor.trigger([e.to_dict() for e in events])
+        if self.music and events:
+            self.music.trigger([e.to_dict() for e in events])
 
     def perf(self) -> dict[str, Any]:
         lt = self._loop_times

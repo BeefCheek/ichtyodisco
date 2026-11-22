@@ -33,6 +33,8 @@ class SimFish:
     length: float  # fraction of tank width
     temperament: float  # 0 calm .. 1 restless
     rest_until: float = 0.0
+    excursion_until: float = 0.0
+    excursion_dir: np.ndarray | None = None
 
 
 class SimulatedAquarium:
@@ -110,8 +112,19 @@ class SimulatedAquarium:
             else:
                 base = 0.10 + 0.12 * f.temperament
                 acc = self.rng.normal(0, 0.25 + 0.4 * f.temperament, 3) * np.array([1, 0.6, 0.6])
-                acc += (centroid - f.pos) * 0.35  # cohesion
-                acc += (mean_v - f.vel) * 0.4  # alignment
+                if f.excursion_until > self.t and f.excursion_dir is not None:
+                    acc += f.excursion_dir * 2.5  # a quick escapade away from the shoal...
+                    base *= 2.5
+                else:
+                    pull = 0.35 if f.excursion_until + 3.0 < self.t else 1.4  # ...then hurry back
+                    acc += (centroid - f.pos) * pull  # cohesion
+                    acc += (mean_v - f.vel) * 0.4  # alignment
+                    if not feeding and self.rng.random() < 0.0015 * (0.5 + f.temperament):
+                        away = f.pos - centroid
+                        away[1] *= 0.5
+                        norm = float(np.linalg.norm(away)) or 1.0
+                        f.excursion_dir = away / norm
+                        f.excursion_until = self.t + float(self.rng.uniform(0.6, 2.5))
                 for g in self.fish:  # separation
                     if g is not f:
                         d = f.pos - g.pos

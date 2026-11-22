@@ -57,6 +57,8 @@ trails_seconds = 4.0
 
 [music]
 enabled = false
+mode = "generative"          # or "score" (game-style adaptive score)
+# score = "scores/demo/score.toml"
 port = "ichtyodisco"        # virtual port; or part of a port name: "IAC", "loopMIDI", "Minilogue"
 # record_path = "outputs/session.mid"
 key = "D"

@@ -1,0 +1,245 @@
+# ichtyodisco — demo adaptive score (placeholder clips, D dorian, 4/4)
+#
+#   uv run ichtyodisco --demo --midi --score scores/demo/score.toml
+#
+# Everything in quotes is an expression over the tank's live state:
+#   fish_count, activity, cohesion, nnd, polarization, mean_y (0 surface..1 bottom),
+#   mean_z (0 glass..1 back), burst_ratio, rest_ratio, surface_ratio,
+#   <metric>_z (deviation from the learnt normal for this hour, e.g. activity_z),
+#   n_rest / n_cruise / n_explore / n_burst, feeding, mood, hour, night,
+#   section, section_bars, bar, and every [signal.*] below.
+# In stingers, the event's own data is available too: x, y, z, speed, duration, distance,
+#   groups, angle, n_fish.
+# Functions: min max abs round clip lerp step smoothstep sqrt exp log.
+#
+# Clips are .mid files (any length, rounded up to whole bars) — compose your own in a DAW.
+# A stinger can also just fire one note (`note = 76, channel = 10`) to trigger a sample.
+
+[score]
+name = "Démo ichtyodisco"
+bpm = "84 + 6 * clip(activity_z, -2, 2)"   # the tank's agitation pushes the tempo (bar by bar)
+beats_per_bar = 4
+phrase_bars = 4
+default_section = "calm"
+
+# ---------------------------------------------------------------- signals (intensity meters)
+[signal.excursions]          # fish leaving the shoal and coming back
+on = ["school_return"]
+add = 1
+half_life_s = 12
+max = 5
+
+[signal.chase_heat]
+on = ["chase", "encounter", "dash"]
+add = "1.2 if kind == 'chase' else 0.12"
+half_life_s = 6
+max = 2
+
+# ---------------------------------------------------------------- sections
+[section.empty]
+when = "fish_count == 0"
+priority = 50
+min_bars = 1
+layers = [ { clip = "clips/drone.mid", name = "drone" } ]
+
+[section.night]
+when = "night and rest_ratio > 0.4"
+priority = 5
+bpm = 66
+on_enter = { clip = "clips/night_enter.mid" }
+layers = [
+  { clip = "clips/night_pad.mid" },
+  { clip = "clips/shimmer.mid", name = "shimmer", gain = "0.4 + 0.6 * clip(excursions / 3)" },
+]
+
+[section.calm]
+layers = [
+  { clip = "clips/pad.mid", name = "pad" },
+  { clip = "clips/bass.mid", name = "bass", gain = "clip(fish_count / 5, 0.3, 1)" },
+  { clip = "clips/arps.mid", name = "arps", gain = "smoothstep(0.3, 0.8, polarization)" },
+]
+
+[section.explore]
+when = "activity_z > 0.8 or n_explore >= 2"
+priority = 1
+layers = [
+  { clip = "clips/pad.mid", name = "pad" },                 # shared with calm: keeps playing across the switch
+  { clip = "clips/bass.mid", name = "bass" },
+  { clip = "clips/ostinato.mid", gain = "clip(0.4 + activity_z / 3, 0.3, 1)" },
+  { clip = "clips/drums_light.mid", name = "drums_light", gain = "clip(activity_z / 2, 0.4, 1)" },
+]
+
+[section.schooling]
+when = "polarization > 0.75 and fish_count >= 3"
+priority = 2
+layers = [
+  { clip = "clips/pad.mid", name = "pad" },
+  { clip = "clips/arps.mid", name = "arps" },
+  { clip = "clips/ostinato.mid" },
+  { clip = "clips/drums_light.mid", name = "drums_light" },
+]
+
+[section.feeding]
+when = "feeding"
+priority = 10
+min_bars = 2
+bpm = 100
+layers = [
+  { clip = "clips/pad.mid", name = "pad", gain = 0.6 },
+  { clip = "clips/bass_busy.mid" },
+  { clip = "clips/drums_groove.mid" },
+  { clip = "clips/feast_lead.mid", fade_beats = 0 },
+]
+
+# ---------------------------------------------------------------- overlays (cut across sections)
+[[overlay]]
+name = "chase"
+clip = "clips/chase_pulse.mid"
+gain = "clip(chase_heat - 0.6)"          # appears when chases / encounters pile up
+fade_beats = 1
+
+[[overlay]]
+name = "excursion_shimmer"
+clip = "clips/shimmer.mid"
+gain = "clip((excursions - 1) / 3) * (0 if section == 'night' else 1)"
+
+[[overlay]]
+name = "deep_drone"
+clip = "clips/drone.mid"
+gain = "0.7 * smoothstep(0.55, 0.9, mean_z)"   # the shoal hangs at the back: the music goes deep
+
+# ---------------------------------------------------------------- transitions
+[[transition]]
+from = "*"
+to = "feeding"
+at = "bar"
+bridge = { clip = "clips/riser.mid" }
+
+[[transition]]
+from = "feeding"
+to = "*"
+at = "bar"
+bridge = { clip = "clips/feast_out.mid" }
+
+[[transition]]
+from = "calm"
+to = "explore"
+at = "beat"
+
+[[transition]]
+from = "explore"
+to = "calm"
+at = "bar"
+
+[[transition]]
+from = "*"
+to = "empty"
+at = "now"
+
+# ---------------------------------------------------------------- stingers (interactions)
+# A fish slips out of the shoal for a moment and comes back: a sharp "spike" sample,
+# panned where it happened, louder when it came back fast.
+[[stinger]]
+name = "spike"
+on = "school_return"
+when = "duration < 3"
+note = 76                 # GM high wood block — put your spike sample on this key
+channel = 10
+quantize = "16th"
+pan = "x"
+gain = "clip(0.5 + speed / 6, 0.5, 1)"
+cooldown_s = 0.3
+
+# A longer excursion gets a little "welcome back" phrase, an octave higher near the surface.
+[[stinger]]
+name = "welcome_back"
+on = "school_return"
+when = "duration >= 3"
+clip = "clips/welcome_back.mid"
+quantize = "beat"
+pan = "x"
+transpose = "12 if y < 0.3 else 0"
+cooldown_s = 2
+
+[[stinger]]
+name = "leave_tick"
+on = "school_leave"
+note = 80                 # GM mute triangle
+channel = 10
+quantize = "16th"
+pan = "x"
+gain = 0.6
+cooldown_s = 0.5
+
+[[stinger]]
+name = "encounter"
+on = "encounter"
+clip = "clips/encounter.mid"
+quantize = "beat"
+pan = "x"
+transpose = "-12 if y > 0.6 else 0"      # meetings near the bottom sound an octave lower
+cooldown_s = 2
+per_fish = false
+
+[[stinger]]
+name = "dash"
+on = "dash"
+clip = "clips/dash_roll.mid"
+quantize = "16th"
+pan = "x"
+gain = "clip(speed / 8, 0.4, 1)"
+cooldown_s = 1.5
+per_fish = false
+
+[[stinger]]
+name = "bubbles"
+on = "surface"
+clip = "clips/bubbles.mid"
+quantize = "16th"
+pan = "x"
+cooldown_s = 1
+
+[[stinger]]
+name = "glass"
+on = "glass"
+note = 81                 # GM open triangle: a fish comes to say hello to the camera
+channel = 10
+quantize = "beat"
+pan = "x"
+gain = 0.7
+cooldown_s = 3
+per_fish = false
+
+[[stinger]]
+name = "split"
+on = "school_split"
+clip = "clips/split_stab.mid"
+quantize = "beat"
+per_fish = false
+cooldown_s = 4
+
+[[stinger]]
+name = "merge"
+on = "school_merge"
+clip = "clips/merge_resolve.mid"
+quantize = "bar"
+per_fish = false
+cooldown_s = 4
+
+[[stinger]]
+name = "turn"
+on = "group_turn"
+note = 55                 # GM splash cymbal
+channel = 10
+quantize = "16th"
+per_fish = false
+cooldown_s = 3
+
+[[stinger]]
+name = "newcomer"
+on = ["new_resident", "return"]
+note = 84
+channel = 3
+velocity = 100
+beats = 2
+quantize = "bar"

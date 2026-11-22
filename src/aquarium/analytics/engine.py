@@ -11,6 +11,7 @@ import numpy as np
 
 from aquarium.analytics.behavior import STATE_LABELS_FR, STATES, BehaviorClassifier
 from aquarium.analytics.events import EventContext, EventDetector, FishView, describe_z, mood
+from aquarium.analytics.interactions import FishFrame, InteractionDetector
 from aquarium.analytics.kinematics import FishTrack
 from aquarium.analytics.residents import ResidentRegistry
 from aquarium.analytics.social import group_metrics
@@ -37,6 +38,9 @@ class AnalyticsEngine:
             chase_min_s=self.cfg.chase_min_seconds,
             hiding_s=self.cfg.hiding_seconds,
         )
+        self.interactions = InteractionDetector()
+        self._pending_interactions: list[AquariumEvent] = []
+        self.recent_interactions: deque[AquariumEvent] = deque(maxlen=30)
         self.tracks: dict[int, FishTrack] = {}
         self.states: dict[int, str] = {}
         self.zones: dict[int, dict[str, str]] = {}
@@ -62,6 +66,7 @@ class AnalyticsEngine:
         self.registry.assign(fish, frame, t)
 
         points = []
+        frames: list[FishFrame] = []
         for f in fish:
             fid = f.resident_id
             if fid is None:
@@ -81,6 +86,9 @@ class AnalyticsEngine:
             self.zones[fid] = zone
             self.norm_pos[fid] = (xn, yn, f.z)
             points.append((xn, yn, f.z))
+            res = self.registry.residents.get(fid)
+            frames.append(FishFrame(fid, res.name if res else f"#{fid}", np.asarray(track.position),
+                                    xn, yn, f.z, np.array([k.vx, k.vy, k.vz]), k.speed_bls, state))
             r = self.registry.residents.get(fid)
             if r is not None and dt > 0:
                 r.visible_s += dt
@@ -90,6 +98,10 @@ class AnalyticsEngine:
                 r.state_time[state] = r.state_time.get(state, 0.0) + dt
         if points and dt > 0:
             self.occupancy.add(points, t, weight=dt)
+        inter = self.interactions.update(t, frames)
+        if inter:
+            self._pending_interactions.extend(inter)
+            self.recent_interactions.extend(inter)
 
         for fid in [i for i, tr in self.tracks.items() if t - tr.last_seen > self.cfg.history_seconds]:
             del self.tracks[fid]
@@ -219,6 +231,10 @@ class AnalyticsEngine:
             "group": {"centroid": [round(c, 4) for c in g.centroid]},
             "events": [e.to_dict() for e in new_events],
             "recent_events": [e.to_dict() for e in list(self.recent_events)[-12:]][::-1],
+            "interactions": {
+                "recent": [e.to_dict() for e in list(self.recent_interactions)[-8:]][::-1],
+                "counts": dict(self.interactions.counts),
+            },
             "occupancy": {
                 "vertical": dict(zip(VERTICAL, [round(v, 3) for v in self.occupancy.vertical_profile()], strict=True)),
                 "depth": [round(v, 3) for v in self.occupancy.depth_profile()],
@@ -250,6 +266,11 @@ class AnalyticsEngine:
             out.append({"id": i, "x": xn, "y": yn, "z": zn,
                         "speed_bls": self.tracks[i].kin.speed_bls,
                         "state": self.states.get(i, "cruise")})
+        return out
+
+    def drain_interactions(self) -> list[AquariumEvent]:
+        """Per-frame micro-interactions (school_leave/return, encounter, dash...) since last call."""
+        out, self._pending_interactions = self._pending_interactions, []
         return out
 
     def drain_events(self) -> list[AquariumEvent]:

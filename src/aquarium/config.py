@@ -113,6 +113,10 @@ class MusicConfig:
     """Generative music sent as MIDI to your synths (see aquarium/music/conductor.py)."""
 
     enabled: bool = False
+    # "generative": the conductor improvises from the tank's state.
+    # "score": adaptive game-style score (sections / layers / stingers) read from `score`.
+    mode: str = "generative"
+    score: str | None = None  # path to a score .toml (see scores/demo/score.toml)
     port: str | None = "ichtyodisco"  # virtual port name, or part of an existing port's name
     record_path: str | None = None  # also record the session to a .mid file
     key: str = "D"

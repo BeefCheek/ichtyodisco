@@ -80,3 +80,18 @@
 - Apple released Depth Pro 2 on 2026-11-19 (arXiv 2611.26603). Added `DepthPro2Estimator` using its *unbuffered streaming* mode (`model.stream(mode="unbuffered")`): temporally consistent depth for a live camera, which directly reduces fake z-motion.
 - Kept as an opt-in, separately installed package (not on PyPI, research-only weights), so the default install and a monetised public stream stay on Depth Anything V2 Small (Apache-2.0).
 - The stream is reopened if the frame size changes (one stream per video size); the depth worker still drops stale frames, so the model sees frames at the worker's rate, not the camera's.
+
+### Adaptive "video game" score mode (Nov 2026)
+
+- **What we delivered**
+  - `InteractionDetector`: per-frame micro-interactions (school leave/return with excursion duration, split/merge, encounters, dashes, surface/bottom/glass/back-wall contacts, group turns, appear/vanish), thresholds relative to the shoal's median spacing.
+  - `ScorePlayer` + TOML scores: sections chosen by expressions and priorities, switches on beat/bar/phrase boundaries with per-transition bridges, layers with live gains, overlays, stingers (quantised, panned, transposed, gain from the event) and decaying signals. Demo score + clip generator.
+
+- **Options discussed**
+  - *Per-fish "who plays what" only*: kept for the generative mode; the score mode lets the composer own the material while the tank owns the arrangement.
+  - *Loops restarting at each section*: rejected; every loop is aligned on one global bar grid, so a layer shared by two sections continues seamlessly (sections "intersect").
+  - *`eval` of raw Python in scores*: rejected; expressions are parsed and checked against a whitelist of AST nodes and functions, unknown names are 0.
+  - *Emitting interactions at the 2 Hz snapshot rate*: rejected; they are detected per frame and sent to the music immediately so a spike lands on the next 16th, not half a second late.
+
+- **Why this approach**
+  - It's the standard adaptive-music toolbox (horizontal re-sequencing, vertical remixing, stingers, RTPC-like signals) mapped onto ethology-flavoured metrics, so a composer can reason about it with familiar game-audio concepts.

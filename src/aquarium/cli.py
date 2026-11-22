@@ -31,6 +31,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument("--midi", nargs="?", const="ichtyodisco", metavar="PORT",
                    help="play the tank on your synths: virtual port 'ichtyodisco' by default, or "
                         "(part of) an existing port name, e.g. 'IAC', 'loopMIDI', 'Minilogue'")
+    p.add_argument("--score", metavar="SCORE.toml",
+                   help="game-style adaptive score (sections, layers, stingers) instead of the "
+                        "generative conductor, e.g. scores/demo/score.toml")
     p.add_argument("--midi-record", metavar="FILE.mid", help="also record the music to a MIDI file")
     p.add_argument("--midi-list", action="store_true", help="list MIDI output ports and exit")
     p.add_argument("--key", help="musical key, e.g. D, F#, Bb (default D)")
@@ -71,10 +74,12 @@ def config_from_args(a: argparse.Namespace) -> AppConfig:
     if a.osc:
         host, _, port = a.osc.rpartition(":")
         cfg.osc.enabled, cfg.osc.host, cfg.osc.port = True, host or "127.0.0.1", int(port)
-    if a.midi or a.midi_record:
+    if a.midi or a.midi_record or a.score:
         cfg.music.enabled = True
         cfg.music.port = a.midi
         cfg.music.record_path = a.midi_record or cfg.music.record_path
+    if a.score:
+        cfg.music.mode, cfg.music.score = "score", a.score
     if a.key:
         cfg.music.key = a.key
     if a.bpm:

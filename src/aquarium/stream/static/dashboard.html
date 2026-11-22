@@ -357,8 +357,13 @@ function renderHeader() {
 function renderMusic() {
   const mu = snap.music; if (!mu) return;
   $("#musiccard").hidden = false;
-  $("#music").innerHTML = [["Tonalité", `${esc(mu.key)} <small>${esc(mu.mode)}</small>`], ["Accord", `${esc(mu.chord)} <small>${esc(mu.roman)}</small>`],
-    ["Tempo", `${fmt(mu.bpm, 0)} <small>bpm</small>`], ["Notes jouées", mu.notes]]
+  const tiles = mu.mode === "score"
+    ? [["Section", `${esc(mu.section)}${mu.next ? ` <small>→ ${esc(mu.next)}</small>` : ""}`],
+       ["Couches", `${Object.keys(mu.layers || {}).length} <small>${esc(Object.keys(mu.layers || {}).join(", "))}</small>`],
+       ["Tempo", `${fmt(mu.bpm, 0)} <small>bpm</small>`], ["Stingers", `${mu.stingers} <small>${esc(mu.last_stinger || "")}</small>`]]
+    : [["Tonalité", `${esc(mu.key)} <small>${esc(mu.mode)}</small>`], ["Accord", `${esc(mu.chord)} <small>${esc(mu.roman)}</small>`],
+       ["Tempo", `${fmt(mu.bpm, 0)} <small>bpm</small>`], ["Notes jouées", mu.notes]];
+  $("#music").innerHTML = tiles
     .map(([l, v]) => `<div class="kpi"><div class="label">${l}</div><div class="value">${v}</div></div>`).join("");
 }
 function drawAll() { drawTimeline(); drawProfile(); drawTop(); }
