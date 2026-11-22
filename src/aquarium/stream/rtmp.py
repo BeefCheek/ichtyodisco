@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import shutil
+import signal
 import subprocess
 import sys
 import threading
@@ -38,8 +39,10 @@ def build_ffmpeg_cmd(cfg: StreamConfig) -> list[str]:
         cmd += ["-preset", cfg.preset, "-tune", "zerolatency", "-sc_threshold", "0"]
     if live_audio:
         # resample against the video clock so hours of streaming don't drift out of sync
+        # -shortest: a live audio device never reaches EOF, so without it closing the video
+        # pipe does not end ffmpeg and the .mp4 is killed before its index is written.
         cmd += ["-map", "0:v", "-map", "1:a", "-c:a", "aac", "-b:a", "160k", "-ar", "44100",
-                "-af", "aresample=async=1000"]
+                "-af", "aresample=async=1000", "-shortest"]
     elif cfg.silent_audio:
         cmd += ["-c:a", "aac", "-b:a", "128k", "-shortest"]
     url = cfg.url
@@ -138,14 +141,27 @@ class FFmpegStreamer:
         self._close()
 
     def _close(self) -> None:
-        if self._proc is not None:
-            try:
-                if self._proc.stdin:
-                    self._proc.stdin.close()
-                self._proc.wait(timeout=10)
-            except (subprocess.TimeoutExpired, OSError):
-                self._proc.kill()
-            self._proc = None
+        if self._proc is None:
+            return
+        proc, self._proc = self._proc, None
+        try:
+            if proc.stdin:
+                proc.stdin.close()
+            proc.wait(timeout=5)
+            return
+        except (subprocess.TimeoutExpired, OSError):
+            pass
+        # Still running (e.g. blocked on a live input): SIGINT makes ffmpeg finalise the
+        # file / stream cleanly; only kill it if that does not work either.
+        try:
+            if sys.platform != "win32":
+                proc.send_signal(signal.SIGINT)
+                proc.wait(timeout=10)
+                return
+        except (subprocess.TimeoutExpired, OSError):
+            pass
+        proc.kill()
+        proc.wait()
 
     def stop(self) -> None:
         self._stop.set()

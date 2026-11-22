@@ -93,3 +93,4 @@ def test_ffmpeg_command_with_synth_audio_input():
     assert cmd[i + 1:i + 3] == ["-i", ":0"]
     assert "anullsrc=channel_layout=stereo:sample_rate=44100" not in cmd
     assert "aresample=async=1000" in cmd
+    assert "-shortest" in cmd  # live audio never ends: video EOF must end the output
