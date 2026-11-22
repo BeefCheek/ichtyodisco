@@ -74,3 +74,9 @@
   - Musical decisions run on their own clock thread (16th-note grid, note-offs scheduled on a heap) so video inference jitter never affects timing.
   - Mode changes wait for a mood to be stable for a bar, so the harmony doesn't flap.
   - Every note is released on exit (all-notes-off panic), so synths never hang on a stuck note.
+
+### Depth Pro 2 (Nov 2026)
+
+- Apple released Depth Pro 2 on 2026-11-19 (arXiv 2611.26603). Added `DepthPro2Estimator` using its *unbuffered streaming* mode (`model.stream(mode="unbuffered")`): temporally consistent depth for a live camera, which directly reduces fake z-motion.
+- Kept as an opt-in, separately installed package (not on PyPI, research-only weights), so the default install and a monetised public stream stay on Depth Anything V2 Small (Apache-2.0).
+- The stream is reopened if the frame size changes (one stream per video size); the depth worker still drops stale frames, so the model sees frames at the worker's rate, not the camera's.

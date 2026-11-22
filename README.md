@@ -65,13 +65,24 @@ Une seule caméra ne voit pas la profondeur ; un modèle **monoculaire** l'estim
 
 | modèle (`--depth`) | vitesse | licence | quand l'utiliser |
 |---|---|---|---|
-| `depth-anything-v2-small` | rapide (temps réel sur GPU modeste) | Apache-2.0 | **défaut**, OK pour un stream public |
-| `depth-pro` (Apple) | ~0,3 s/image sur gros GPU, plusieurs s sur CPU | Apple ASCL, **recherche uniquement** | qualité max, usage perso |
+| `depth-pro-2` (S, 24M) · `-b` · `-l` · `-h` (H+, 872M) | S temps réel sur GPU, H+ lent | Apple, **recherche / non commercial** | **le plus stable en direct** (mode streaming), usage perso |
+| `depth-anything-v2-small` | rapide | Apache-2.0 | **défaut**, OK pour un stream public / monétisé |
+| `depth-pro` (v1, Apple) | ~0,3 s/image sur gros GPU | Apple ASCL, recherche | qualité image par image |
 | `depth-anything-v2-base/large` | moyen / lent | CC-BY-NC-4.0 | non commercial |
 
-> Note : il n'existe pas (à ce jour) de « Depth Pro 2 » publié par Apple — le modèle actuel est
-> Depth Pro (ICLR 2025). « V2 » désigne Depth Anything V2. N'importe quel checkpoint
-> Hugging Face `depth-estimation` fonctionne via `--depth <repo/modèle>`.
+**Depth Pro 2** (Apple, novembre 2026) a un mode *streaming* : chaque image est prédite
+avec les quelques images précédentes, donc la profondeur ne scintille plus d'une image à
+l'autre — moins de faux mouvements en z, des vitesses 3D plus propres. Il donne aussi de la
+profondeur **métrique** (en mètres). Il n'est pas sur PyPI, à installer à part :
+
+```bash
+uv pip install "git+https://github.com/apple-aiml-research/ml-depth-pro-2"
+uv run ichtyodisco -s 0 --model models/fish.pt --depth depth-pro-2      # S, 97 Mo
+uv run ichtyodisco -s 0 --depth depth-pro-2-l --device cuda:0             # plus net, plus lourd
+```
+
+Les poids se téléchargent au premier lancement. `[depth] window` règle le nombre d'images
+passées prises en compte (4 par défaut : plus = plus stable, mais plus lent).
 
 Comment c'est intégré :
 - **Asynchrone** : le tracking tourne à chaque image ; la profondeur tourne sur un thread à
@@ -192,7 +203,7 @@ reflets sur la vitre (sinon les reflets deviennent des « poissons fantômes »)
 ## Développement
 
 ```bash
-uv run pytest            # 40 tests, ~10 s, sans caméra ni GPU (simulateur)
+uv run pytest            # 42 tests, ~10 s, sans caméra ni GPU (simulateur)
 uv run ruff check src tests
 ```
 

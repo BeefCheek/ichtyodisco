@@ -16,8 +16,10 @@ imgsz = 640
 
 [depth]
 enabled = true
-# "depth-anything-v2-small" (fast, Apache-2.0) | "depth-pro" (sharper, research licence)
+# "depth-anything-v2-small" (fast, Apache-2.0) | "depth-pro-2" / "depth-pro-2-l" (Apple, steady
+# live depth, research licence, install separately: see README) | "depth-pro" (v1)
 model = "depth-anything-v2-small"
+window = 4                 # Depth Pro 2: past frames used per prediction
 max_rate_hz = 4.0
 input_width = 518
 

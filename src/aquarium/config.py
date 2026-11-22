@@ -32,12 +32,15 @@ class TrackingConfig:
 @dataclass
 class DepthConfig:
     enabled: bool = True
-    # Any HF depth-estimation checkpoint. Presets: "depth-pro", "depth-anything-v2-small",
-    # "depth-anything-v2-base", "depth-anything-v2-large".
+    # "depth-pro-2" (S) / "depth-pro-2-b" / "-l" / "-h": Apple Depth Pro 2 in live mode, steady
+    #     depth, research licence (install: see README)
+    # "depth-anything-v2-small" (Apache-2.0) / "-base" / "-large", "depth-pro" (v1), or any HF
+    #     depth-estimation checkpoint (`uv sync --extra depth`)
     model: str = "depth-anything-v2-small"
     device: str | None = None
     max_rate_hz: float = 4.0  # depth is slow: run it asynchronously at a capped rate
     input_width: int = 518  # frame is downscaled before inference
+    window: int = 4  # Depth Pro 2 only: past frames attended to (steadier but slower when larger)
     # Robust normalisation of the tank volume (percentiles of the depth map in the tank ROI)
     near_percentile: float = 3.0
     far_percentile: float = 97.0

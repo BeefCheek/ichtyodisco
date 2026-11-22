@@ -18,7 +18,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument("-s", "--source", help="webcam index (0), video file / rtsp URL, or 'sim'")
     p.add_argument("--demo", action="store_true", help="synthetic aquarium, no camera or GPU needed")
     p.add_argument("--model", help="YOLO weights for detection (e.g. models/fish.pt)")
-    p.add_argument("--depth", help="depth model: depth-pro | depth-anything-v2-small | ... | off")
+    p.add_argument("--depth", help="depth-pro-2[-b|-l|-h] | depth-anything-v2-small | depth-pro | off")
     p.add_argument("--device", help="cuda:0 / mps / cpu for tracking and depth")
     p.add_argument("--stream", metavar="URL", help="rtmp://... (YouTube/Twitch) or output .mp4/.flv")
     p.add_argument("--audio-in", metavar="FMT:DEVICE",
@@ -111,8 +111,10 @@ def main(argv: list[str] | None = None) -> None:
             try:
                 depth = build_depth(cfg)
                 log.info("depth model: %s on %s", cfg.depth.model, getattr(depth, "device", "?"))
-            except ImportError:
-                log.warning("depth disabled: install the extra with `uv sync --extra depth`")
+            except ImportError as exc:
+                hint = ("Depth Pro 2: uv pip install git+https://github.com/apple-aiml-research/ml-depth-pro-2"
+                        if cfg.depth.model.startswith("depth-pro-2") else "uv sync --extra depth")
+                log.warning("depth disabled (%s). Install: %s", exc, hint)
     Pipeline(cfg, source, tracker, depth, max_frames=a.frames).run()
 
 

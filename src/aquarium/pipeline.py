@@ -55,6 +55,11 @@ def build_tracker(cfg: AppConfig) -> Tracker:
 
 
 def build_depth(cfg: AppConfig) -> DepthEstimator:
+    if cfg.depth.model.startswith("depth-pro-2"):
+        from aquarium.depth.depthpro2_estimator import DepthPro2Estimator
+
+        return DepthPro2Estimator(cfg.depth.model, device=cfg.depth.device,
+                                  input_width=cfg.depth.input_width, window=cfg.depth.window)
     from aquarium.depth.hf_estimator import HFDepthEstimator
 
     return HFDepthEstimator(cfg.depth.model, device=cfg.depth.device,
