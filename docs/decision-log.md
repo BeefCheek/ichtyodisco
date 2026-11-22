@@ -1,5 +1,11 @@
 ## Recent Decisions
 
+### Detection model choice (Jan 2026)
+
+- **Decision**: Use YOLOv11 (start with n/s) as the primary detector; RT-DETR kept as a secondary option for future tests.
+- **Why**: YOLOv11 gives faster inference on our hardware while keeping good accuracy on small objects compared to YOLOv8; RT-DETR is heavier and slower on macOS/MPS/CPU.
+- **Plan**: Keep scripts/notebooks parameterized (`model_name`, `imgsz`, `conf`, `device`) so we can swap models (YOLO11 variants or RT-DETR) by changing a single parameter later.
+
 ### Video capture (Dec 2025)
 
 - **What we delivered**
