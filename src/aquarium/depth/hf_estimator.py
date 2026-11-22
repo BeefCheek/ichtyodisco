@@ -2,7 +2,10 @@
 
 Two families of outputs exist and are unified here into "larger = farther":
     * metric depth (Apple Depth Pro): already distance-like.
-    * relative inverse depth / disparity (Depth Anything V2): larger = closer -> inverted.
+    * relative inverse depth / disparity (Depth Anything V2): larger = closer -> negated.
+      It is only known up to an unknown scale *and shift*, so ``1/disparity`` is meaningless;
+      over the shallow range of a tank, disparity is ~linear in distance, and negating it
+      keeps everything affine, which the near/far calibration then cancels exactly.
 
 Licences matter for a public stream: Apple Depth Pro weights are research-only (Apple
 ASCL), Depth Anything V2 *Small* is Apache-2.0 while Base/Large are CC-BY-NC-4.0.
@@ -67,5 +70,14 @@ class HFDepthEstimator:
         depth = out.predicted_depth.squeeze().float().cpu().numpy()
         depth = cv2.resize(depth, (rgb.shape[1], rgb.shape[0]), interpolation=cv2.INTER_LINEAR)
         if self.inverse:
-            depth = 1.0 / np.maximum(depth - depth.min() + 1e-3, 1e-3)
+            depth = disparity_to_depth(depth)
         return depth.astype(np.float32)
+
+
+def disparity_to_depth(disparity: np.ndarray) -> np.ndarray:
+    """Affine-invariant relative disparity -> "larger = farther" values (see module doc).
+
+    The former ``1 / (d - min + eps)`` blew up on the farthest pixels, so after percentile
+    calibration every fish sat at z ~ 0 (front glass) on real footage.
+    """
+    return -disparity

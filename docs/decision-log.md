@@ -1,5 +1,11 @@
 ## Recent Decisions
 
+### Relative depth: negate disparity, never invert it (Nov 2026)
+
+- **Decision**: Depth Anything V2 output (relative disparity) is turned into "larger = farther" by negation, not by `1/(d - min + eps)`.
+- **Why**: the model's disparity is only known up to an unknown scale *and shift*, so any reciprocal is arbitrary. On real footage (`Aquarium_Home_Réel.mp4`) the reciprocal blew up the farthest pixels and, after the near/far percentile calibration, every fish sat at z ≈ 0.02. Over the shallow depth of a tank, disparity is close to linear in distance, and negation keeps the map affine, which the calibration then cancels exactly (z went to 0.1–0.8, mean ≈ 0.55).
+- **Scope**: metric models (Depth Pro, Depth Pro 2) are unchanged.
+
 ### Detection model choice (Jan 2026)
 
 - **Decision**: Use YOLOv11 (start with n/s) as the primary detector; RT-DETR kept as a secondary option for future tests.
