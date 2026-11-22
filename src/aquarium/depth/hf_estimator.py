@@ -44,7 +44,7 @@ class HFDepthEstimator:
         self.device = device or _auto_device()
         dtype = torch.float16 if self.device == "cuda" else torch.float32
         self.processor = AutoImageProcessor.from_pretrained(checkpoint)
-        self.model = AutoModelForDepthEstimation.from_pretrained(checkpoint, torch_dtype=dtype)
+        self.model = AutoModelForDepthEstimation.from_pretrained(checkpoint, dtype=dtype)
         self.model.to(self.device).eval()
         self._torch = torch
         self._dtype = dtype

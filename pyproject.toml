@@ -17,7 +17,7 @@ dependencies = [
 [project.optional-dependencies]
 # Monocular depth (Apple Depth Pro, Depth Anything V2, ...) through Hugging Face transformers.
 depth = [
-    "transformers>=4.49",
+    "transformers>=4.56",  # `dtype=` kwarg
     "pillow>=10",
 ]
 # Live MIDI ports (virtual port, IAC, loopMIDI, USB synths). Recording .mid works without it.
