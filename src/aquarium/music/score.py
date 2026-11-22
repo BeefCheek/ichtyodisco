@@ -344,6 +344,10 @@ class ScorePlayer(MidiScheduler):
 
     def panic(self, t: float) -> None:
         self._panic(t, {ch for ch, _ in self._active} | self._used_channels())
+        # Re-centre the wheels we moved, or the synth stays detuned after we stop.
+        for ch in sorted({m.channel for m in self.score.modulations if m.pitchbend}):
+            self._emit(mido.Message("pitchwheel", channel=ch, pitch=0), t)
+            self._cc_cache.pop((ch, -1), None)
         if self.send_clock:
             self._emit(mido.Message("stop"), t)
 

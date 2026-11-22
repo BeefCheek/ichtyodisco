@@ -287,6 +287,8 @@ def test_mode_root_swing_and_modulations_follow_the_tank(hscore):
     assert cc74 and cc74[-1] == round(0.75 * 127)
     pb = [m.pitch for _, m in sink.msgs if m.type == "pitchwheel"]
     assert pb and abs(pb[-1] - 4095) <= 1
+    p.panic(t)  # what stop() / Ctrl+C sends
+    assert [m.pitch for _, m in sink.msgs if m.type == "pitchwheel"][-1] == 0  # wheel re-centred
     # alert + feeding + playful: phrygian, up a whole tone, swung 16ths — from the next bar on
     p.set_state([{"id": 1}], {"feeding": True, "metrics": {"alert": 1, "playful": 1, "height": 1.0}})
     sink.msgs.clear()
