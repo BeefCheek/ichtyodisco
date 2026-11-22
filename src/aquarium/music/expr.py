@@ -67,7 +67,8 @@ class Expr:
             return
         self._const = None
         try:
-            tree = ast.parse(self.source.strip(), mode="eval")
+            # parenthesised so expressions can span several lines in a TOML multi-line string
+            tree = ast.parse("(" + self.source.strip() + "\n)", mode="eval")
         except SyntaxError as exc:
             raise ExprError(f"invalid expression {self.source!r}: {exc.msg}") from exc
         for node in ast.walk(tree):

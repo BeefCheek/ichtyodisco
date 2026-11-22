@@ -202,6 +202,20 @@ décident de ce qui joue, comme une musique de jeu adaptative (iMUSE / Wwise / F
   seconde et revient → *spike* (`note 76`, canal 10), plus fort s'il revient vite.
 - **Signaux** : des jauges d'intensité nourries par les événements, qui retombent toutes
   seules (`excursions`, `chase_heat`) et pilotent n'importe quelle couche.
+- **Harmonie** : les clips sont écrits dans un ton et un mode (`[harmony] key = "D"`,
+  `written_in = "dorian"`). À chaque mesure, l'aquarium choisit le **mode** joué (lydien
+  quand c'est serein et haut, phrygien en alerte, éolien la nuit…) et peut **décaler la
+  tonique** (+1 ton pendant le repas) : chaque note garde son degré, les mêmes clips changent
+  de couleur. `degrees` décale une couche ou un stinger **dans la gamme** (la phrase monte
+  quand le poisson revient près de la surface, les arpèges suivent la hauteur du banc).
+- **Modulations** : CC et pitch bend continus pilotés par la position et le comportement
+  (`[[modulation]]` : brillance CC74 = proximité de la vitre, molette CC1 = polarisation,
+  réverbe CC91 = profondeur, pan CC10 = position gauche-droite du banc, pitch bend = hauteur
+  du poisson le plus rapide), avec lissage. Plus le **swing** (`swing = "0.18 if mood ==
+  'joueur' else 0"`) et le **tempo** en expressions.
+
+Dans les expressions, en plus des métriques : la géométrie du banc (`centroid_x/y/z`,
+`spread`) et du poisson le plus rapide (`lead_x/y/z`, `lead_speed`).
 
 Interactions détectées image par image (relatives à l'espacement du banc) :
 `school_leave`, `school_return` (+ durée de l'escapade), `school_split`, `school_merge`,
@@ -240,7 +254,7 @@ reflets sur la vitre (sinon les reflets deviennent des « poissons fantômes »)
 ## Développement
 
 ```bash
-uv run pytest            # 54 tests, ~10 s, sans caméra ni GPU (simulateur)
+uv run pytest            # 57 tests, ~10 s, sans caméra ni GPU (simulateur)
 uv run ruff check src tests
 ```
 

@@ -214,3 +214,98 @@ def test_demo_score_loads_and_plays():
     _run(p, t, 2.0)
     assert any(m.note == 76 and m.channel == 9 for _, m in _ons(sink))  # the spike
     assert p.status()["section"] in score.sections
+
+
+# ---------------------------------------------------------------- harmony & modulation
+HARMONY_SCORE = """
+[score]
+bpm = 120
+swing = "0.5 if playful else 0"
+
+[harmony]
+key = "D"
+written_in = "dorian"
+mode = "'phrygian' if alert else 'dorian'"
+root = "2 if feeding else 0"
+
+[section.main]
+layers = [ { clip = "mel.mid", name = "mel", degrees = "round((1 - height) * 7)" },
+           { clip = "kit.mid", name = "kit" } ]
+
+[[modulation]]
+name = "brightness"
+channel = 1
+cc = 74
+value = "1 - depth"
+
+[[modulation]]
+channel = 1
+pitchbend = true
+value = "bend"
+rate = "beat"
+
+[[stinger]]
+on = "surface"
+clip = "mel.mid"
+degrees = "round(x * 7)"
+quantize = "now"
+"""
+
+
+@pytest.fixture
+def hscore(tmp_path):
+    # D E F G A B C D (D dorian), then an off-beat 16th, all on channel 1; a kick on channel 10
+    _write_mid(tmp_path / "mel.mid", [(0, 0.25, 64, 0), (0.25, 0.2, 62, 0)])
+    _write_mid(tmp_path / "kit.mid", [(0, 0.1, 36, 9)])
+    (tmp_path / "score.toml").write_text(HARMONY_SCORE)
+    return Score.load(tmp_path / "score.toml")
+
+
+def test_pitch_mapping_modes_degrees_and_drums(hscore):
+    p = ScorePlayer(hscore, ListSink(), humanize=0)
+    assert p.pitch(64, 0) == 64  # written mode, no shift: unchanged
+    p.mode = "phrygian"
+    assert p.pitch(64, 0) == 63  # E (2nd degree of D dorian) -> Eb in D phrygian
+    assert p.pitch(71, 0) == 70  # B (6th) -> Bb
+    assert p.pitch(36, 9) == 36  # drums are never re-pitched
+    p.mode = "dorian"
+    assert p.pitch(62, 0, degrees=2) == 65  # D + 2 degrees = F
+    assert p.pitch(62, 0, degrees=7) == 74  # one octave
+    assert p.pitch(63, 0) == 63  # chromatic Eb stays chromatic
+    p.root_shift = 2
+    assert p.pitch(62, 0) == 64  # key change D -> E
+
+
+def test_mode_root_swing_and_modulations_follow_the_tank(hscore):
+    sink = ListSink()
+    p = ScorePlayer(hscore, sink, humanize=0)
+    p.set_state([{"id": 1}], {"metrics": {"depth": 0.25, "height": 1.0, "bend": 0.5}})
+    t = _run(p, 0.0, 2.1)  # one bar at 120 bpm
+    first = [m.note for _, m in _ons(sink, 0)][:2]
+    assert first == [64, 62]  # written dorian, height 1 -> 0 degrees
+    cc74 = [m.value for _, m in sink.msgs if m.type == "control_change" and m.control == 74]
+    assert cc74 and cc74[-1] == round(0.75 * 127)
+    pb = [m.pitch for _, m in sink.msgs if m.type == "pitchwheel"]
+    assert pb and abs(pb[-1] - 4095) <= 1
+    # alert + feeding + playful: phrygian, up a whole tone, swung 16ths — from the next bar on
+    p.set_state([{"id": 1}], {"feeding": True, "metrics": {"alert": 1, "playful": 1, "height": 1.0}})
+    sink.msgs.clear()
+    _run(p, t, 2.5)
+    assert p.mode == "phrygian" and p.root_shift == 2
+    bar_start = 4.0  # changes apply on the next bar line
+    ons = _ons(sink, 0, after=bar_start - 1e-6)
+    assert ons[0][1].note == 65 and ons[1][1].note == 64  # E->Eb->F (root +2), D->E
+    assert abs(ons[1][0] - (bar_start + 0.125 + 0.5 * 0.125)) < 0.01  # off-beat 16th swung
+    kick = _ons(sink, 9)
+    assert kick and kick[0][1].note == 36
+
+
+def test_stinger_pitch_follows_position_in_scale_degrees(hscore):
+    sink = ListSink()
+    p = ScorePlayer(hscore, sink, humanize=0)
+    p.set_state([{"id": 1}], {"metrics": {"height": 1.0}})
+    t = _run(p, 0.0, 0.3)
+    sink.msgs.clear()
+    p.trigger([{"kind": "surface", "fish": [1], "data": {"x": 2 / 7}}])  # 2 degrees up
+    _run(p, t, 0.05)
+    assert [m.note for _, m in _ons(sink, 0)][:1] == [67]  # E + 2 degrees = G

@@ -13,6 +13,12 @@ You compose MIDI clips in your DAW; a TOML score says how the tank plays them:
   quantised to the grid, panned / transposed / scaled from the event itself.
 * **signals**: game-style intensity meters fed by events and decaying over time
   (``excursions``, ``chase_heat``...), usable in any expression.
+* **harmony**: clips are written in one key/mode; the tank can switch the *mode* (lydian when
+  serene, phrygian on alert...) and shift the *root*, and every pitched note is re-harmonised
+  on the fly (scale degree -> same degree of the new mode). ``degrees`` shifts layers or
+  stingers diatonically (e.g. a stinger's pitch follows the height of the fish that fired it).
+* **modulations**: continuous MIDI CC / pitch bend driven by expressions (filter cutoff from
+  depth, mod wheel from polarisation, pan from the shoal's position...), plus **swing**.
 
 All loops are aligned on one global bar grid, so a layer shared between two sections never
 jumps back to its start when the section changes.
@@ -36,6 +42,7 @@ from aquarium.music.clips import Clip, load_clip, single_note
 from aquarium.music.expr import Expr
 from aquarium.music.midi_out import MidiSink
 from aquarium.music.scheduler import MidiScheduler, clip
+from aquarium.music.theory import MODES, note_number
 
 log = logging.getLogger(__name__)
 
@@ -48,6 +55,7 @@ class LayerSpec:
     clip: Clip
     gain: Expr | None = None
     fade_beats: float = 2.0
+    degrees: Expr | None = None  # diatonic shift, evaluated at each bar
 
 
 @dataclass
@@ -59,6 +67,8 @@ class SectionSpec:
     min_bars: int = 2
     bpm: Expr | None = None
     on_enter: Clip | None = None
+    mode: Expr | None = None  # overrides [harmony] mode while in this section
+    root: Expr | None = None
 
 
 @dataclass
@@ -77,6 +87,7 @@ class StingerSpec:
     quantize: str = "16th"  # now | 16th | beat | bar
     gain: Expr | None = None
     transpose: Expr | None = None
+    degrees: Expr | None = None
     pan: Expr | None = None
     cooldown_s: float = 0.0
     per_fish: bool = True
@@ -94,6 +105,28 @@ class SignalSpec:
 
 
 @dataclass
+class HarmonySpec:
+    key: int = 0  # pitch class the clips are written in
+    written: str = "ionian"  # mode the clips are written in
+    mode: Expr | None = None  # mode to play in (name), evaluated at each bar
+    root: Expr | None = None  # semitone shift of the tonic (key change), evaluated at each bar
+    exclude: frozenset[int] = frozenset({9})  # channels never re-pitched (drums)
+
+
+@dataclass
+class ModulationSpec:
+    channel: int  # 0-15
+    value: Expr  # 0..1 (CC) or -1..1 (pitch bend)
+    cc: int | None = None
+    pitchbend: bool = False
+    rate: str = "16th"  # 16th | beat | bar
+    smooth: float = 0.0  # 0 = immediate, 0.9 = very slow
+    lo: int = 0
+    hi: int = 127
+    name: str = ""
+
+
+@dataclass
 class Score:
     name: str
     bpm: Expr
@@ -105,6 +138,9 @@ class Score:
     transitions: list[TransitionSpec] = field(default_factory=list)
     stingers: list[StingerSpec] = field(default_factory=list)
     signals: dict[str, SignalSpec] = field(default_factory=dict)
+    harmony: HarmonySpec = field(default_factory=HarmonySpec)
+    modulations: list[ModulationSpec] = field(default_factory=list)
+    swing: Expr | None = None
 
     # ------------------------------------------------------------------ loading
     @classmethod
@@ -135,7 +171,8 @@ class Score:
         def layer(spec: dict[str, Any], where: str) -> LayerSpec:
             c = clip_of(spec, where)
             key = spec.get("name") or f"{spec.get('clip', c.name)}@{spec.get('channel', '')}"
-            return LayerSpec(key, c, opt(spec, "gain"), float(spec.get("fade_beats", 2.0)))
+            return LayerSpec(key, c, opt(spec, "gain"), float(spec.get("fade_beats", 2.0)),
+                             opt(spec, "degrees"))
 
         sections = {}
         for name, s in data.get("section", {}).items():
@@ -145,6 +182,7 @@ class Score:
                 when=opt(s, "when"), priority=int(s.get("priority", 0)),
                 min_bars=int(s.get("min_bars", 2)), bpm=opt(s, "bpm"),
                 on_enter=clip_of(s["on_enter"], f"section.{name}.on_enter") if "on_enter" in s else None,
+                mode=opt(s, "mode"), root=opt(s, "root"),
             )
         if not sections:
             raise ValueError(f"{path}: a score needs at least one [section.<name>]")
@@ -165,7 +203,7 @@ class Score:
             stingers.append(StingerSpec(
                 on={on} if isinstance(on, str) else set(on), clip=clip_of(s, f"stinger[{i}]"),
                 when=opt(s, "when"), quantize=s.get("quantize", "16th"), gain=opt(s, "gain"),
-                transpose=opt(s, "transpose"), pan=opt(s, "pan"),
+                transpose=opt(s, "transpose"), degrees=opt(s, "degrees"), pan=opt(s, "pan"),
                 cooldown_s=float(s.get("cooldown_s", 0.0)), per_fish=bool(s.get("per_fish", True)),
                 name=s.get("name", f"{'/'.join(sorted({on} if isinstance(on, str) else on))}#{i}"),
             ))
@@ -175,11 +213,35 @@ class Score:
                              float(s.get("max", math.inf)), opt(s, "when"))
             for name, s in data.get("signal", {}).items()
         }
+        h = data.get("harmony", {})
+        written = h.get("written_in", "ionian")
+        if written not in MODES:
+            raise ValueError(f"harmony.written_in must be one of {', '.join(MODES)}")
+        harmony = HarmonySpec(
+            key=note_number(h.get("key", "C")), written=written, mode=opt(h, "mode"),
+            root=opt(h, "root"),
+            exclude=frozenset(int(c) - 1 for c in h.get("exclude_channels", [10])),
+        )
+        modulations = []
+        for i, m in enumerate(data.get("modulation", [])):
+            if "cc" not in m and not m.get("pitchbend"):
+                raise ValueError(f"modulation[{i}]: needs 'cc = <0-127>' or 'pitchbend = true'")
+            rate = m.get("rate", "16th")
+            if rate not in ("16th", "beat", "bar"):
+                raise ValueError(f"modulation[{i}]: rate must be 16th, beat or bar")
+            modulations.append(ModulationSpec(
+                channel=int(m["channel"]) - 1, value=Expr(m["value"]), cc=m.get("cc"),
+                pitchbend=bool(m.get("pitchbend", False)), rate=rate,
+                smooth=clip(float(m.get("smooth", 0.0)), 0.0, 0.99),
+                lo=int(m.get("min", 0)), hi=int(m.get("max", 127)),
+                name=m.get("name", f"ch{m['channel']}/{'pb' if m.get('pitchbend') else m.get('cc')}"),
+            ))
         return cls(
             name=meta.get("name", path.stem), bpm=Expr(meta.get("bpm", 90)), beats_per_bar=bpb,
             phrase_bars=int(meta.get("phrase_bars", 4)), default_section=default,
             sections=sections, overlays=[layer(o, "overlay") for o in data.get("overlay", [])],
             transitions=transitions, stingers=stingers, signals=signals,
+            harmony=harmony, modulations=modulations, swing=opt(meta, "swing"),
         )
 
 
@@ -210,6 +272,11 @@ class ScorePlayer(MidiScheduler):
         self.stingers_fired = 0
         self.last_stinger = ""
         self.history: list[tuple[int, str]] = [(0, self.section)]  # (bar, section) changes
+        self.mode = score.harmony.written
+        self.root_shift = 0
+        self.swing = 0.0
+        self._layer_degrees: dict[str, int] = {}
+        self._mod_values: dict[int, float] = {}
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
 
@@ -305,11 +372,27 @@ class ScorePlayer(MidiScheduler):
         e["mood"] = (snap.get("mood") or {}).get("label", "")
         for k, v in (snap.get("states") or {}).items():
             e[f"n_{k}"] = v
+        if fish:  # where the shoal is right now, and where its fastest member is
+            xs = [float(f.get("x", 0.5)) for f in fish]
+            ys = [float(f.get("y", 0.5)) for f in fish]
+            zs = [float(f["z"]) for f in fish if f.get("z") is not None]
+            e["centroid_x"], e["centroid_y"] = sum(xs) / len(xs), sum(ys) / len(ys)
+            e["centroid_z"] = sum(zs) / len(zs) if zs else 0.5
+            mx = e["centroid_x"]
+            e["spread"] = math.sqrt(sum((x - mx) ** 2 for x in xs) / len(xs))
+            lead = max(fish, key=lambda f: float(f.get("speed_bls", 0.0)))
+            e["lead_x"], e["lead_y"] = float(lead.get("x", 0.5)), float(lead.get("y", 0.5))
+            e["lead_z"] = float(lead["z"]) if lead.get("z") is not None else 0.5
+            e["lead_speed"] = float(lead.get("speed_bls", 0.0))
+        else:
+            e.update(centroid_x=0.5, centroid_y=0.5, centroid_z=0.5, spread=0.0,
+                     lead_x=0.5, lead_y=0.5, lead_z=0.5, lead_speed=0.0)
         hour = datetime.now().hour
         e["hour"], e["night"] = hour, hour >= 22 or hour < 7
         e["section"] = self.section
         e["section_bars"] = (self.step - self.section_start_step) // self.steps_per_bar
         e["bar"] = self.step // self.steps_per_bar
+        e["mode_now"] = self.mode
         for name in self.score.signals:
             e[name] = self._signal(name, t)
         return e
@@ -353,15 +436,71 @@ class ScorePlayer(MidiScheduler):
         if gain <= 0.01:
             return
         shift = int(round(st.transpose.num(env))) if st.transpose else 0
+        degrees = int(round(clip(st.degrees.num(env), -21, 21))) if st.degrees else 0
         if st.pan is not None:
             pan = clip(st.pan.num(env, 0.5), 0.0, 1.0) * 127
             for ch in {n.channel for n in st.clip.notes}:
                 self._cc(max(t0 - 0.002, now), ch, 10, pan, min_delta=1)
         for n in st.clip.notes:
-            self._play(t0 + n.start * self.beat_s, n.channel, n.note + shift, n.velocity * gain,
+            self._play(t0 + n.start * self.beat_s, n.channel,
+                       self.pitch(n.note, n.channel, degrees, shift), n.velocity * gain,
                        n.dur * self.beat_s)
         self.stingers_fired += 1
         self.last_stinger = st.name
+
+    # ------------------------------------------------------------------ harmony
+    def pitch(self, note: int, channel: int, degrees: int = 0, semitones: int = 0) -> int:
+        """Re-harmonise one written note: diatonic shift, then current mode and root."""
+        h = self.score.harmony
+        if channel in h.exclude:
+            return note + semitones
+        if self.mode == h.written and not degrees and not self.root_shift:
+            return note + semitones
+        src, dst = MODES[h.written], MODES[self.mode]
+        octave, pc = divmod(note - h.key, 12)
+        if pc in src:
+            idx, off = src.index(pc), 0
+        else:  # chromatic note: keep its offset from the scale degree below it
+            idx = max(i for i, step in enumerate(src) if step < pc)
+            off = pc - src[idx]
+        o2, i2 = divmod(octave * 7 + idx + degrees, 7)
+        return h.key + self.root_shift + o2 * 12 + dst[i2] + off + semitones
+
+    def _update_harmony(self, env: dict[str, Any]) -> None:
+        h = self.score.harmony
+        sec = self.score.sections[self.section]
+        mode_expr, root_expr = sec.mode or h.mode, sec.root or h.root
+        if mode_expr is not None:
+            m = str(mode_expr(env)).strip().lower()
+            if m in MODES and m != self.mode:
+                log.info("score: mode %s -> %s", self.mode, m)
+                self.mode = m
+        if root_expr is not None:
+            self.root_shift = int(round(clip(root_expr.num(env), -12, 12)))
+        if self.score.swing is not None:
+            self.swing = clip(self.score.swing.num(env), 0.0, 0.5)
+        for key, ly in self._layers.items():
+            if ly.degrees is not None:
+                self._layer_degrees[key] = int(round(clip(ly.degrees.num(env), -14, 14)))
+
+    def _modulate(self, t: float, env: dict[str, Any]) -> None:
+        on_beat = self.step % STEPS_PER_BEAT == 0
+        on_bar = self.step % self.steps_per_bar == 0
+        for i, m in enumerate(self.score.modulations):
+            if (m.rate == "beat" and not on_beat) or (m.rate == "bar" and not on_bar):
+                continue
+            target = m.value.num(env, 0.0)
+            prev = self._mod_values.get(i)
+            v = target if prev is None else prev * m.smooth + target * (1 - m.smooth)
+            self._mod_values[i] = v
+            if m.pitchbend:
+                pb = int(clip(v, -1.0, 1.0) * 8191)
+                key = (m.channel, -1)
+                if abs(self._cc_cache.get(key, -100000) - pb) >= 64:
+                    self._cc_cache[key] = pb
+                    self._emit(mido.Message("pitchwheel", channel=m.channel, pitch=pb), t)
+            elif m.cc is not None:
+                self._cc(t, m.channel, int(m.cc), m.lo + clip(v, 0.0, 1.0) * (m.hi - m.lo), min_delta=1)
 
     # ------------------------------------------------------------------ sections
     def _select(self, env: dict[str, Any]) -> str:
@@ -438,8 +577,12 @@ class ScorePlayer(MidiScheduler):
                         if when == self.step:  # "now": switch on this very step
                             self.pending = None
                             self._enter_section(target)
-            # 4) layer gains
+            # 4) layer gains, and harmony / swing / layer degrees at bar starts
             self._update_gains(env)
+            if self.step % self.steps_per_bar == 0:
+                self._update_harmony(env)
+        if self.score.modulations:
+            self._modulate(t, env if on_beat else self.env(t))
         self._schedule_notes(t)
         if self.send_clock:
             for k in range(6):  # 24 ppqn = 6 per 16th
@@ -472,16 +615,26 @@ class ScorePlayer(MidiScheduler):
             if g < 0.04:
                 continue
             vel_scale = math.sqrt(g)
+            deg = self._layer_degrees.get(key, 0)
             for start, n in self._layers[key].clip.window(a, b):
-                self._play(t + (start - a) * self.beat_s, n.channel, n.note,
+                self._play(self._swung(t, start, a), n.channel, self.pitch(n.note, n.channel, deg),
                            n.velocity * vel_scale, n.dur * self.beat_s * 0.98)
         for once in (self.bridge, self._enter):
             if once is None:
                 continue
             c, origin = once[0], once[1]
             for start, n in c.once(a, b, origin):
-                self._play(t + (start - a) * self.beat_s, n.channel, n.note, n.velocity,
-                           n.dur * self.beat_s * 0.98)
+                self._play(self._swung(t, start, a), n.channel, self.pitch(n.note, n.channel),
+                           n.velocity, n.dur * self.beat_s * 0.98)
+
+    def _swung(self, t: float, start: float, a: float) -> float:
+        """Delay notes sitting on the off-beat 16ths by ``swing`` of a 16th."""
+        when = t + (start - a) * self.beat_s
+        if self.swing > 0:
+            sixteenth = round(start * STEPS_PER_BEAT, 3)
+            if sixteenth == int(sixteenth) and int(sixteenth) % 2 == 1:
+                when += self.swing * self.step_s
+        return when
 
     # ------------------------------------------------------------------ status
     def status(self) -> dict[str, Any]:
@@ -494,6 +647,7 @@ class ScorePlayer(MidiScheduler):
             "layers": {k.split("@")[0].split("/")[-1].removesuffix(".mid"): round(g, 2)
                        for k, g in self.gains.items() if g >= 0.04},
             "bpm": round(self.bpm, 1),
+            "harmony": {"mode": self.mode, "root": self.root_shift, "swing": round(self.swing, 2)},
             "bar": self.step // self.steps_per_bar,
             "notes": self.notes_played,
             "stingers": self.stingers_fired,

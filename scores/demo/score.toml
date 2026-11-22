@@ -7,10 +7,16 @@
 #   mean_z (0 glass..1 back), burst_ratio, rest_ratio, surface_ratio,
 #   <metric>_z (deviation from the learnt normal for this hour, e.g. activity_z),
 #   n_rest / n_cruise / n_explore / n_burst, feeding, mood, hour, night,
-#   section, section_bars, bar, and every [signal.*] below.
+#   section, section_bars, bar, mode_now, and every [signal.*] below.
+# Shoal geometry: centroid_x, centroid_y, centroid_z, spread (horizontal),
+#   lead_x, lead_y, lead_z, lead_speed (the fastest fish right now).
 # In stingers, the event's own data is available too: x, y, z, speed, duration, distance,
 #   groups, angle, n_fish.
 # Functions: min max abs round clip lerp step smoothstep sqrt exp log.
+#
+# The tank drives four things: WHICH clips play (sections, layers, stingers), HOW LOUD
+# (gain expressions), WHAT HARMONY (mode / root / degrees re-pitch every clip on the fly)
+# and HOW IT SOUNDS (CC / pitch bend modulations, swing, tempo).
 #
 # Clips are .mid files (any length, rounded up to whole bars) — compose your own in a DAW.
 # A stinger can also just fire one note (`note = 76, channel = 10`) to trigger a sample.
@@ -18,9 +24,62 @@
 [score]
 name = "Démo ichtyodisco"
 bpm = "84 + 6 * clip(activity_z, -2, 2)"   # the tank's agitation pushes the tempo (bar by bar)
+swing = "0.18 if mood == 'joueur' else 0.06 * clip(activity_z, 0, 1)"
 beats_per_bar = 4
 phrase_bars = 4
 default_section = "calm"
+
+# ---------------------------------------------------------------- harmony
+# The clips are written in D dorian. Every bar, the tank picks the mode it is played in and
+# can shift the tonic; each note keeps its scale degree, so the same clips change colour.
+[harmony]
+key = "D"
+written_in = "dorian"
+mode = '''
+  'phrygian'   if mood == 'sur le qui-vive' or tight_shoal > 0.5 else
+  'lydian'     if mood == 'serein' and mean_y < 0.5 else
+  'aeolian'    if night or mood == 'endormi' else
+  'mixolydian' if mood == 'joueur' else
+  'dorian'
+'''
+root = "2 if feeding else 0"     # the feast lifts everything a whole tone, game-style
+exclude_channels = [10]          # drums are never re-pitched
+
+# ---------------------------------------------------------------- modulations (CC / pitch bend)
+[[modulation]]
+name = "pad brightness = how close the shoal is to the glass"
+channel = 1
+cc = 74
+value = "1 - centroid_z"
+smooth = 0.8
+
+[[modulation]]
+name = "pad mod wheel = synchronised swimming"
+channel = 1
+cc = 1
+value = "polarization"
+smooth = 0.7
+
+[[modulation]]
+name = "reverb on everything melodic = depth of the shoal"
+channel = 3
+cc = 91
+value = "0.25 + 0.6 * centroid_z"
+rate = "beat"
+
+[[modulation]]
+name = "ostinato follows the shoal left-right"
+channel = 5
+cc = 10
+value = "centroid_x"
+smooth = 0.6
+
+[[modulation]]
+name = "drone bends with the height of the fastest fish"
+channel = 6
+pitchbend = true
+value = "0.15 * (0.5 - lead_y)"
+smooth = 0.9
 
 # ---------------------------------------------------------------- signals (intensity meters)
 [signal.excursions]          # fish leaving the shoal and coming back
@@ -28,6 +87,12 @@ on = ["school_return"]
 add = 1
 half_life_s = 12
 max = 5
+
+[signal.tight_shoal]          # alert reactions (slow event from the analytics)
+on = ["tight_shoal"]
+add = 1
+half_life_s = 30
+max = 1
 
 [signal.chase_heat]
 on = ["chase", "encounter", "dash"]
@@ -56,7 +121,8 @@ layers = [
 layers = [
   { clip = "clips/pad.mid", name = "pad" },
   { clip = "clips/bass.mid", name = "bass", gain = "clip(fish_count / 5, 0.3, 1)" },
-  { clip = "clips/arps.mid", name = "arps", gain = "smoothstep(0.3, 0.8, polarization)" },
+  # arps rise (in scale) when the shoal swims high
+  { clip = "clips/arps.mid", name = "arps", gain = "smoothstep(0.3, 0.8, polarization)", degrees = "round((0.5 - centroid_y) * 4)" },
 ]
 
 [section.explore]
@@ -158,7 +224,7 @@ when = "duration >= 3"
 clip = "clips/welcome_back.mid"
 quantize = "beat"
 pan = "x"
-transpose = "12 if y < 0.3 else 0"
+degrees = "round((0.5 - y) * 7)"   # the higher the fish comes back, the higher the phrase (in scale)
 cooldown_s = 2
 
 [[stinger]]
@@ -177,7 +243,7 @@ on = "encounter"
 clip = "clips/encounter.mid"
 quantize = "beat"
 pan = "x"
-transpose = "-12 if y > 0.6 else 0"      # meetings near the bottom sound an octave lower
+degrees = "round((0.5 - y) * 6)"         # meetings near the bottom sound lower, always in key
 cooldown_s = 2
 per_fish = false
 
@@ -197,6 +263,7 @@ on = "surface"
 clip = "clips/bubbles.mid"
 quantize = "16th"
 pan = "x"
+degrees = "round(x * 4)"           # bubbles climb from left to right
 cooldown_s = 1
 
 [[stinger]]
