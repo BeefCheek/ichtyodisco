@@ -20,6 +20,9 @@ def test_full_pipeline_on_simulator(tmp_path):
                                        "--no-dashboard"]))
     cfg.source.capture_width, cfg.source.capture_height = 640, 360
     cfg.stream.width, cfg.stream.height = 640, 360
+    # Snapshots are paced on wall-clock time; on a fast machine 90 frames take < 0.5 s,
+    # leaving only the frame-0 snapshot (before any resident exists). Snapshot every frame.
+    cfg.analytics.snapshot_rate_hz = 1e6
     source, tracker, depth = build_source(cfg)
     source.realtime = False  # as fast as possible, but never skip a frame
     p = Pipeline(cfg, source, tracker, depth, max_frames=90)
