@@ -98,7 +98,9 @@ class VideoFileCapture:
     def wait_for_new_frame(self, timeout_s: float | None = 10.0) -> np.ndarray | None:
         deadline = None if timeout_s is None else time.monotonic() + timeout_s
         with self._cond:
-            while self._seq <= self._consumed_seq and not self.finished:
+            # Also wait while no frame was ever read (_seq 0 > _consumed_seq -1 at start):
+            # returning None at once made the pipeline spin and flood "no frame" warnings.
+            while (self._latest is None or self._seq <= self._consumed_seq) and not self.finished:
                 remaining = None if deadline is None else deadline - time.monotonic()
                 if remaining is not None and remaining <= 0:
                     return None
