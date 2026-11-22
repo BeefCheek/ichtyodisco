@@ -50,8 +50,15 @@ def _sev(z: float, lo: float = 2.0, hi: float = 5.0) -> float:
 
 class EventDetector:
     def __init__(self, cooldown_s: float = 60.0, chase_distance: float = 0.08,
-                 chase_min_s: float = 1.5, hiding_s: float = 45.0):
+                 chase_min_s: float = 1.5, hiding_s: float = 45.0,
+                 feeding_z: float = 1.2, feeding_tau_s: float = 4.0):
         self.cooldown_s = cooldown_s
+        # Feeding uses an EMA of the activity z-score: per-snapshot activity is spiky (fish
+        # dart and pause around the food), so a raw "z > 2 held 2 s" almost never holds.
+        self.feeding_z = feeding_z
+        self.feeding_tau_s = feeding_tau_s
+        self._act_ema: float | None = None
+        self._act_t: float | None = None
         self.chase_distance = chase_distance
         self.chase_min_s = chase_min_s
         self.hiding_s = hiding_s
@@ -67,6 +74,15 @@ class EventDetector:
         start = self._since.setdefault(key, t)
         return t - start >= seconds
 
+    def _smooth_activity(self, act_z: float, t: float) -> float:
+        if self._act_ema is None or self._act_t is None or t <= self._act_t:
+            self._act_ema = act_z if self._act_ema is None else self._act_ema
+        else:
+            a = 1.0 - math.exp(-(t - self._act_t) / self.feeding_tau_s)
+            self._act_ema += a * (act_z - self._act_ema)
+        self._act_t = t
+        return self._act_ema
+
     def _cool(self, key: Any, t: float, cooldown: float | None = None) -> bool:
         cd = self.cooldown_s if cooldown is None else cooldown
         last = self._last.get(key)
@@ -80,18 +96,19 @@ class EventDetector:
         t, m, z = c.t, c.metrics, c.zscores
         n = len(c.fish)
         act_z = z.get("activity", 0.0)
+        act_ema = self._smooth_activity(act_z, t)
 
-        # --- Feeding frenzy: activity spike while the group rises to the surface.
-        feeding_cond = n >= 1 and act_z > 2.0 and (
+        # --- Feeding frenzy: sustained activity rise while the group rises to the surface.
+        feeding_cond = n >= 1 and act_ema > self.feeding_z and (
             m.get("surface_ratio", 0) > 0.4 or m.get("mean_y", 1) < 0.4
         )
         if not self.feeding and self._held("feeding", feeding_cond, t, 2.0):
             self.feeding, self.feeding_started = True, t
             if self._cool("feeding", t, 600):
-                out.append(AquariumEvent("feeding", t, _sev(act_z), "Festin ! Ruée vers la "
-                                         f"surface (activité {act_z:+.1f}σ)",
-                                         data={"activity_z": act_z}))
-        elif self.feeding and act_z < 1.0 and m.get("surface_ratio", 0) < 0.3:
+                out.append(AquariumEvent("feeding", t, _sev(act_ema, lo=1.0), "Festin ! Ruée vers "
+                                         f"la surface (activité {act_ema:+.1f}σ)",
+                                         data={"activity_z": act_ema}))
+        elif self.feeding and act_ema < 1.0 and m.get("surface_ratio", 0) < 0.3:
             duration = t - (self.feeding_started or t)
             self.feeding, self.feeding_started = False, None
             out.append(AquariumEvent("feeding_end", t, 0.2,

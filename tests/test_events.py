@@ -56,3 +56,27 @@ def test_mood_labels():
     assert mood({"fish_count": 3}, {"activity": 2.5}, False)[0] == "excité"
     assert mood({"fish_count": 3, "rest_ratio": 0.8}, {}, False)[0] == "endormi"
     assert mood({"fish_count": 3}, {}, False)[0] == "serein"
+
+
+def test_feeding_detected_despite_spiky_activity():
+    # Real (and simulated) meals: fish dart and pause, so the activity z-score oscillates.
+    det = EventDetector()
+    fish = [_fish(i, [0.1 * i, 0.05, 0.1], [0.1, 0, 0], 5.0, y=0.05) for i in range(4)]
+    kinds = []
+    for k in range(20):
+        z = 3.0 if k % 2 == 0 else 0.0
+        evs = det.update(_ctx(k * 0.5, fish=fish, metrics={"surface_ratio": 1.0, "mean_y": 0.12},
+                              zscores={"activity": z}))
+        kinds += [e.kind for e in evs]
+    assert kinds.count("feeding") == 1
+
+
+def test_no_feeding_from_surface_alone():
+    det = EventDetector()
+    fish = [_fish(i, [0.1 * i, 0.05, 0.1], [0.1, 0, 0], 1.0, y=0.05) for i in range(4)]
+    kinds = []
+    for k in range(40):
+        evs = det.update(_ctx(k * 0.5, fish=fish, metrics={"surface_ratio": 1.0, "mean_y": 0.12},
+                              zscores={"activity": 0.3}))
+        kinds += [e.kind for e in evs]
+    assert "feeding" not in kinds
